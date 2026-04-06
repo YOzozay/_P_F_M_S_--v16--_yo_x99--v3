@@ -9,6 +9,7 @@ export default function LoansPage() {
   const [activeTab, setActiveTab] = useState('car');
   const [loading, setLoading] = useState(true);
   const [loans, setLoans] = useState([]);
+  const [simulators, setSimulators] = useState({});
 
   // Forms
   const [carForm, setCarForm] = useState({ name: '', company: '', totalAmount: '', monthlyInstallment: '', startDate: '', totalMonths: '' });
@@ -142,6 +143,16 @@ export default function LoansPage() {
   const carLoansList = loans.filter(l => l.type === 'car');
   const homeLoansList = loans.filter(l => l.type === 'home');
 
+  const updateSimulator = (id, field, value) => {
+    setSimulators(prev => ({
+      ...prev,
+      [id]: {
+        ...(prev[id] || { rate: '', extra: '' }),
+        [field]: value
+      }
+    }));
+  };
+
   const renderLoanCard = (loan) => {
     let monthsPaid = 0;
     if (loan.start_date) {
@@ -188,6 +199,95 @@ export default function LoansPage() {
              <div className="bg-emerald-500 h-2 rounded-full transition-all duration-500" style={{ width: `${Math.min(progress, 100)}%` }}></div>
           </div>
         </div>
+
+        {loan.type === 'home' && (
+          <div className="mt-5 pt-5 border-t border-slate-200 dark:border-slate-700">
+            <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-3">🛠 Simulator (คำนวณโปะบ้าน)</h4>
+            <div className="grid grid-cols-2 gap-3 mb-4">
+              <div>
+                <label className="block text-xs text-slate-500 mb-1">ดอกเบี้ย/ปี (%)</label>
+                <input 
+                  type="number" 
+                  className="w-full p-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-600 rounded-lg text-sm outline-none focus:border-emerald-500 transition-colors"
+                  placeholder="เช่น 3.0"
+                  value={simulators[loan.id]?.rate || ''}
+                  onChange={(e) => updateSimulator(loan.id, 'rate', e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-500 mb-1">เงินโปะเพิ่ม (฿)</label>
+                <input 
+                  type="number" 
+                  className="w-full p-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-600 rounded-lg text-sm outline-none focus:border-blue-500 transition-colors"
+                  placeholder="0"
+                  value={simulators[loan.id]?.extra || ''}
+                  onChange={(e) => updateSimulator(loan.id, 'extra', e.target.value)}
+                />
+              </div>
+            </div>
+
+            {(() => {
+              const rate = parseFloat(simulators[loan.id]?.rate) || 0;
+              const extra = parseFloat(simulators[loan.id]?.extra) || 0;
+
+              if (rate > 0 && remaining > 0) {
+                const nextMonthInterest = remaining * ((rate / 100) / 12);
+                const standardPrincipal = due - nextMonthInterest;
+                
+                let timeSavedText = "—";
+                let interestSavedText = "—";
+
+                if (standardPrincipal > 0 && extra > 0) {
+                  // Standard Scenario (No Extra)
+                  const nStandard = Math.log(due / (due - nextMonthInterest)) / Math.log(1 + ((rate/100)/12));
+                  const totalPaidStandard = nStandard * due;
+                  
+                  // Extra Scenario
+                  const newDue = due + extra;
+                  const newInterestPortion = remaining * ((rate / 100) / 12);
+                  const nExtra = Math.log(newDue / (newDue - newInterestPortion)) / Math.log(1 + ((rate/100)/12));
+                  const totalPaidExtra = nExtra * newDue;
+
+                  const interestSaved = Math.max(0, totalPaidStandard - totalPaidExtra);
+                  const monthsSaved = Math.max(0, nStandard - nExtra);
+
+                  if (isFinite(interestSaved) && isFinite(monthsSaved)) {
+                    const savedY = Math.floor(monthsSaved / 12);
+                    const savedM = Math.floor(monthsSaved % 12);
+                    timeSavedText = savedY > 0 ? `${savedY} ปี ${savedM} เดือน` : `${savedM} เดือน`;
+                    interestSavedText = `฿${fmt(interestSaved)}`;
+                  }
+                }
+
+                return (
+                  <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-3 text-sm border border-blue-100 dark:border-blue-800">
+                    <div className="flex justify-between border-b border-blue-200 dark:border-blue-800 pb-1.5 mb-1.5">
+                      <span className="text-slate-600 dark:text-slate-400">ดอกเบี้ยเดือนถัดไป:</span>
+                      <span className="font-semibold text-rose-500">฿{fmt(nextMonthInterest)}</span>
+                    </div>
+                    <div className="flex justify-between border-b border-blue-200 dark:border-blue-800 pb-1.5 mb-1.5">
+                      <span className="text-slate-600 dark:text-slate-400">ตัดต้นเดือนถัดไป:</span>
+                      <span className="font-semibold text-emerald-600 dark:text-emerald-400">฿{fmt(standardPrincipal)}</span>
+                    </div>
+                    <div className="flex justify-between border-b border-blue-200 dark:border-blue-800 pb-1.5 mb-1.5">
+                      <span className="text-slate-600 dark:text-slate-400">ประหยัดดอกเบี้ยได้:</span>
+                      <span className="font-semibold text-amber-500">{interestSavedText}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-600 dark:text-slate-400">ผ่อนหมดไวขึ้น:</span>
+                      <span className="font-semibold text-blue-600 dark:text-blue-400">{timeSavedText}</span>
+                    </div>
+                  </div>
+                );
+              }
+              return (
+                <div className="text-xs text-slate-400 dark:text-slate-500 text-center">
+                  กรอกดอกเบี้ยต่อปีเพื่อดูการแตกยอด / กรอกเงินโปะเพื่อคำนวณส่วนลด
+                </div>
+              );
+            })()}
+          </div>
+        )}
       </div>
     );
   };
