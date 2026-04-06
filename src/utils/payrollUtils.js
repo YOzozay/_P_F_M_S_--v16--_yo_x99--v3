@@ -26,15 +26,27 @@ export function calculatePayroll(config, otLogs, workingDays = 22) {
     let otPay = 0;
     let otDaysCount = 0; // จำนวนวันที่มีการทำ OT ถึงเกณฑ์ได้ค่าข้าว
   
-    // สมมติว่า otLogs คือ Array ของ { date, multiplier, hours }
+    // OTTrackerPage stores logs as { holiday_hours, ot15, ot3 } — map each correctly
     otLogs.forEach(log => {
-      const hours = Number(log.hours) || 0;
-      const mult = Number(log.multiplier) || 1; // 1, 1.5, 3
-      
-      otPay += (hours * hourlyRate * mult);
-      
-      if (hours >= otMealThreshold) {
-        otDaysCount++;
+      // x1.0 holiday hours
+      const holidayHours = Number(log.holiday_hours) || 0;
+      if (holidayHours > 0) {
+        otPay += holidayHours * hourlyRate * 1.0;
+        if (holidayHours >= otMealThreshold) otDaysCount++;
+      }
+
+      // x1.5 OT evening hours
+      const ot15Hours = Number(log.ot15 || log.ot_evening_1_5x) || 0;
+      if (ot15Hours > 0) {
+        otPay += ot15Hours * hourlyRate * 1.5;
+        if (ot15Hours >= otMealThreshold) otDaysCount++;
+      }
+
+      // x3.0 OT holiday evening hours
+      const ot3Hours = Number(log.ot3 || log.ot_evening_3x) || 0;
+      if (ot3Hours > 0) {
+        otPay += ot3Hours * hourlyRate * 3.0;
+        if (ot3Hours >= otMealThreshold) otDaysCount++;
       }
     });
   
@@ -43,14 +55,21 @@ export function calculatePayroll(config, otLogs, workingDays = 22) {
     const mealOT = otDaysCount * mealOtRate;
     const fuel = workingDays * fuelRate;
   
-    // 5. สรุปรายได้รวม (Gross)
-    const grossIncome = salary + otPay + mealNormal + mealOT + fuel;
+    // 5. รวมสวัสดิการทั้งหมด (ก่อนหักลบ)
+    const totalAllowances = mealNormal + mealOT + fuel;
+
+    // 6. สรุปรายได้รวมก่อนหักลบ (True Gross)
+    //    Gross = Base Salary + OT Pay + All Welfare/Allowances
+    const grossIncome = salary + otPay + totalAllowances;
   
-    // 6. การหักลบ (Deductions)
-    const socialSecurity = Math.min(salary, ssMaxBase) * ssRate;
-    
-    // 7. รายได้สุทธิ (Net)
-    const netIncome = grossIncome - socialSecurity - studentLoan;
+    // 7. การหักลบ (Deductions)
+    //    Social Security คำนวณจาก Base Salary (ไม่รวม OT / เบี้ยเลี้ยง) สูงสุด 750 บาท
+    const socialSecurityBase = Math.min(salary, ssMaxBase) * ssRate;
+    const socialSecurity = Math.min(750, socialSecurityBase);
+    const totalDeductions = socialSecurity + studentLoan;
+
+    // 8. รายได้สุทธิ (Net) = Gross - Deductions
+    const netIncome = grossIncome - totalDeductions;
   
     return {
       hourlyRate,
@@ -58,9 +77,11 @@ export function calculatePayroll(config, otLogs, workingDays = 22) {
       mealNormal,
       mealOT,
       fuel,
-      grossIncome,
-      socialSecurity,
-      studentLoan,
-      netIncome
+      totalAllowances,  // mealNormal + mealOT + fuel
+      grossIncome,       // salary + otPay + totalAllowances  (True Gross, pre-deduction)
+      socialSecurity,    // หัก ประกันสังคม (from base salary only)
+      studentLoan,       // หัก กยศ. (fixed)
+      totalDeductions,   // socialSecurity + studentLoan
+      netIncome,         // grossIncome - totalDeductions
     };
   }

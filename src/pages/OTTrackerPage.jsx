@@ -291,21 +291,40 @@ export default function OTTrackerPage() {
           {payroll && (
             <div className="bg-emerald-50 dark:bg-emerald-900/10 p-6 rounded-xl border border-emerald-200 dark:border-emerald-800/30 shadow-sm">
               <div className="text-emerald-600 dark:text-emerald-400 font-bold mb-4 pb-3 border-b border-emerald-200 dark:border-emerald-800/30">💰 ประมาณการรายได้สุทธิ (Estimate)</div>
-              <div className="space-y-3 text-sm">
+              <div className="space-y-2.5 text-sm">
+                {/* ── Income lines ── */}
                 <div className="flex justify-between text-slate-600 dark:text-slate-300">
-                  <span>เงินเดือนฐาน:</span> <span className="font-semibold">{fmt(config.salary)}</span>
-                </div>
-                <div className="flex justify-between text-slate-600 dark:text-slate-300">
-                  <span>ค่า OT สะสม:</span> <span className="font-bold text-blue-600 dark:text-blue-400">+{fmt(payroll.otPay)}</span>
+                  <span>เงินเดือนฐาน:</span> <span className="font-semibold">฿{fmt(config.salary)}</span>
                 </div>
                 <div className="flex justify-between text-slate-600 dark:text-slate-300">
-                  <span>สวัสดิการ (ค่าอาหาร+เดินทาง):</span> <span className="font-bold text-emerald-600 dark:text-emerald-400">+{fmt(payroll.mealNormal + payroll.mealOT + payroll.fuel)}</span>
+                  <span>ค่า OT สะสม:</span> <span className="font-bold text-blue-600 dark:text-blue-400">+฿{fmt(payroll.otPay)}</span>
                 </div>
-                <div className="flex justify-between text-slate-600 dark:text-slate-300 border-t border-emerald-200 dark:border-emerald-800/30 pt-3 mt-1">
-                  <span>หัก ประกันสังคม / กยศ.:</span> <span className="font-bold text-rose-500">-{fmt(payroll.socialSecurity + payroll.studentLoan)}</span>
+                <div className="flex justify-between text-slate-600 dark:text-slate-300">
+                  <span>สวัสดิการ (ค่าอาหาร+เดินทาง):</span> <span className="font-bold text-emerald-600 dark:text-emerald-400">+฿{fmt(payroll.totalAllowances)}</span>
                 </div>
-                <div className="flex justify-between items-center text-lg font-bold mt-4 bg-white dark:bg-slate-800 p-3 rounded-xl border border-emerald-100 dark:border-emerald-800/50">
-                  <span className="text-slate-700 dark:text-slate-200">รับสุทธิ (Net):</span> <span className="text-emerald-600 dark:text-emerald-400">{fmt(payroll.netIncome)}</span>
+
+                {/* ── Gross subtotal ── */}
+                <div className="flex justify-between text-slate-700 dark:text-slate-200 bg-emerald-100/60 dark:bg-emerald-900/20 rounded-lg px-3 py-2 border border-emerald-200 dark:border-emerald-800/40 font-semibold">
+                  <span>รายได้รวม (Gross):</span>
+                  <span className="text-emerald-700 dark:text-emerald-300">฿{fmt(payroll.grossIncome)}</span>
+                </div>
+
+                {/* ── Deductions ── */}
+                <div className="flex justify-between text-slate-600 dark:text-slate-300 pt-1">
+                  <span>หัก ประกันสังคม <span className="text-slate-400 dark:text-slate-500 text-xs">(จากเงินเดือนฐาน, สูงสุด ฿750)</span>:</span>
+                  <span className="font-bold text-rose-500">-฿{fmt(payroll.socialSecurity)}</span>
+                </div>
+                {payroll.studentLoan > 0 && (
+                  <div className="flex justify-between text-slate-600 dark:text-slate-300">
+                    <span>หัก กยศ. (คงที่):</span>
+                    <span className="font-bold text-rose-500">-฿{fmt(payroll.studentLoan)}</span>
+                  </div>
+                )}
+
+                {/* ── Net total ── */}
+                <div className="flex justify-between items-center text-lg font-bold mt-3 bg-white dark:bg-slate-800 p-3 rounded-xl border border-emerald-100 dark:border-emerald-800/50">
+                  <span className="text-slate-700 dark:text-slate-200">รับสุทธิ (Net):</span>
+                  <span className="text-emerald-600 dark:text-emerald-400">฿{fmt(payroll.netIncome)}</span>
                 </div>
               </div>
             </div>

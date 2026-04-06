@@ -9,6 +9,7 @@ export default function LoansPage() {
   const [activeTab, setActiveTab] = useState('car');
   const [loading, setLoading] = useState(true);
   const [loans, setLoans] = useState([]);
+  const [loadErr, setLoadErr] = useState(null);
   const [simulators, setSimulators] = useState({});
 
   // Forms
@@ -42,14 +43,16 @@ export default function LoansPage() {
 
   const loadData = useCallback(async () => {
     setLoading(true);
+    setLoadErr(null);
     try {
       const action = activeTab === 'car' ? "getCarLoans" : "getHomeLoans";
       const data = await apiGet({ action });
+      if (data?.error) throw new Error(data.error);
       const mapped = Array.isArray(data) ? data.map(i => ({...i, type: activeTab})) : [];
       setLoans(mapped);
     } catch (e) {
       console.error(e);
-      // Fallback if API not fully supported or fails
+      setLoadErr(e.message || 'โหลดข้อมูลไม่สำเร็จ กรุณารีเฟรชหน้า');
       setLoans([]);
     } finally {
       setLoading(false);
@@ -174,7 +177,7 @@ export default function LoansPage() {
     return (
       <div key={loan.id} className="p-5 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl relative group transition-all duration-200 hover:border-slate-300">
         <button onClick={() => handleDelete(loan.id)} className="absolute top-4 right-4 text-slate-400 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-opacity"><Trash2 size={16}/></button>
-        <div className="font-semibold text-slate-800 dark:text-white text-lg">{loan.name}</div>
+        <div className="font-semibold text-slate-800 dark:text-white text-lg truncate pr-8">{loan.name}</div>
         <div className="text-sm text-slate-500 dark:text-slate-400 mt-1">
             {loan.type === 'car' ? 'สถาบันการเงิน' : 'ธนาคาร'}: {loan.lender || loan.company || loan.bank || 'ไม่ระบุ'}
         </div>
@@ -238,20 +241,36 @@ export default function LoansPage() {
                 let interestSavedText = "—";
 
                 if (standardPrincipal > 0 && extra > 0) {
-                  // Standard Scenario (No Extra)
-                  const nStandard = Math.log(due / (due - nextMonthInterest)) / Math.log(1 + ((rate/100)/12));
-                  const totalPaidStandard = nStandard * due;
+                  const monthlyRate = (rate / 100) / 12;
                   
-                  // Extra Scenario
-                  const newDue = due + extra;
-                  const newInterestPortion = remaining * ((rate / 100) / 12);
-                  const nExtra = Math.log(newDue / (newDue - newInterestPortion)) / Math.log(1 + ((rate/100)/12));
-                  const totalPaidExtra = nExtra * newDue;
+                  const simLoan = (principal, basePmt, extraPmt) => {
+                    let bal = principal;
+                    let totalInt = 0;
+                    let months = 0;
+                    let maxLoop = 1200;
+                    const pmt = basePmt + extraPmt;
+                    
+                    while (bal > 0 && maxLoop > 0) {
+                      const int = bal * monthlyRate;
+                      totalInt += int;
+                      let prin = pmt - int;
+                      if (prin < 0) prin = 0; // if payment doesn't even cover interest
+                      if (prin > bal) prin = bal;
+                      bal -= prin;
+                      months++;
+                      maxLoop--;
+                      if (prin === 0 && maxLoop > 0) maxLoop = 0; // infinite loop prevention
+                    }
+                    return { totalInt, months };
+                  };
 
-                  const interestSaved = Math.max(0, totalPaidStandard - totalPaidExtra);
-                  const monthsSaved = Math.max(0, nStandard - nExtra);
+                  const std = simLoan(remaining, due, 0);
+                  const ext = simLoan(remaining, due, extra);
 
-                  if (isFinite(interestSaved) && isFinite(monthsSaved)) {
+                  const interestSaved = Math.max(0, std.totalInt - ext.totalInt);
+                  const monthsSaved = Math.max(0, std.months - ext.months);
+
+                  if (interestSaved > 0 || monthsSaved > 0) {
                     const savedY = Math.floor(monthsSaved / 12);
                     const savedM = Math.floor(monthsSaved % 12);
                     timeSavedText = savedY > 0 ? `${savedY} ปี ${savedM} เดือน` : `${savedM} เดือน`;
@@ -311,6 +330,8 @@ export default function LoansPage() {
       <div className="bg-white dark:bg-slate-800 p-6 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm min-h-[400px]">
         {loading ? (
            <div className="text-center py-20 text-slate-400 animate-pulse">กำลังโหลดข้อมูล...</div>
+        ) : loadErr ? (
+           <div className="py-10 px-4"><div className="text-center text-rose-500 bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 rounded-xl p-5 text-sm">{loadErr}</div></div>
         ) : (
           <>
             {/* CAR LOAN TAB */}

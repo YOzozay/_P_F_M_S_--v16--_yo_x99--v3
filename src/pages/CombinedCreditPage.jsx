@@ -271,7 +271,10 @@ export default function CombinedCreditPage() {
 
                       return (
                         <div key={card.card_id} className={`p-4 bg-slate-50 dark:bg-slate-800/50 border rounded-xl relative group transition-all duration-200 ${active ? 'border-blue-400 shadow-sm' : 'border-slate-200 dark:border-slate-700 hover:border-slate-300'}`}>
-                          <button onClick={() => alert("กำลังพัฒนาระบบลบบัตร")} className="absolute top-3 right-3 text-slate-400 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-opacity"><Trash2 size={16}/></button>
+                          <button onClick={() => {
+                              const isDark = document.documentElement.classList.contains('dark');
+                              Swal.fire({ title: 'กำลังพัฒนา', text: 'ระบบลบบัตรกำลังอยู่ระหว่างพัฒนา', icon: 'info', background: isDark ? '#1e293b' : '#ffffff', color: isDark ? '#f8fafc' : '#334155' });
+                            }} className="absolute top-3 right-3 text-slate-400 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-opacity"><Trash2 size={16}/></button>
                           <div className="font-semibold text-slate-800 dark:text-white text-lg">{card.name}</div>
                           
                           <div className="mt-2 flex justify-between items-end text-xs text-slate-500 dark:text-slate-400 space-y-1">
