@@ -1,0 +1,10 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    /* ตอนสว่างเป็นสีเทาอ่อน(slate-50) ตอนมืดเป็นสีเทาดำ(slate-950) */
+    @apply bg-slate-50 text-slate-800 dark:bg-slate-950 dark:text-slate-200 transition-colors duration-200;
+  }
+}
