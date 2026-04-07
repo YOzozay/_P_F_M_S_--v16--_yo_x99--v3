@@ -63,9 +63,8 @@ export function calculatePayroll(config, otLogs, workingDays = 22) {
     const grossIncome = salary + otPay + totalAllowances;
   
     // 7. การหักลบ (Deductions)
-    //    Social Security คำนวณจาก Base Salary (ไม่รวม OT / เบี้ยเลี้ยง) สูงสุด 750 บาท
-    const socialSecurityBase = Math.min(salary, ssMaxBase) * ssRate;
-    const socialSecurity = Math.min(750, socialSecurityBase);
+    //    Social Security คำนวณจาก Base Salary (ไม่รวม OT / เบี้ยเลี้ยง) 
+    const socialSecurity = Math.min(salary, ssMaxBase) * ssRate;
     const totalDeductions = socialSecurity + studentLoan;
 
     // 8. รายได้สุทธิ (Net) = Gross - Deductions

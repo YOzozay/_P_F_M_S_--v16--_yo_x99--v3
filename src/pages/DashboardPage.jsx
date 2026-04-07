@@ -121,7 +121,7 @@ export default function DashboardPage() {
     const [lastSynced, setLastSynced] = useState(null);
     const stampSync = () => {
         const t = new Date();
-        setLastSynced(`${t.getHours().toString().padStart(2,'0')}:${t.getMinutes().toString().padStart(2,'0')}`);
+        setLastSynced(`${t.getHours().toString().padStart(2, '0')}:${t.getMinutes().toString().padStart(2, '0')}`);
     };
 
     // ── Load main summary (stale-while-revalidate) ───────────
@@ -139,7 +139,7 @@ export default function DashboardPage() {
                 .then((data) => {
                     if (data.error) throw new Error(data.error);
                     setSummary(data);
-                    try { localStorage.setItem(cacheKey, JSON.stringify(data)); } catch {}
+                    try { localStorage.setItem(cacheKey, JSON.stringify(data)); } catch { }
                     stampSync();
                 })
                 .catch((e) => setErr(e.message))
@@ -251,7 +251,7 @@ export default function DashboardPage() {
             });
 
             setHealthData({ totalDebt, totalLoanDue, totalBillDue, totalCreditDue, upcoming });
-            try { localStorage.setItem(cacheKey, JSON.stringify({ totalDebt, totalLoanDue, totalBillDue, totalCreditDue, upcoming })); } catch {}
+            try { localStorage.setItem(cacheKey, JSON.stringify({ totalDebt, totalLoanDue, totalBillDue, totalCreditDue, upcoming })); } catch { }
             stampSync();
         } catch (e) {
             console.error("Health data load error:", e);
@@ -450,7 +450,7 @@ export default function DashboardPage() {
                                                         </div>
 
                                                         <div className="flex justify-between items-baseline pb-4 border-b border-slate-200 dark:border-slate-700/60">
-                                                            <span className="text-base text-slate-500 dark:text-slate-400 font-semibold">หักลบ (ภาษี / ปกส. / ฯลฯ)</span>
+                                                            <span className="text-base text-slate-500 dark:text-slate-400 font-semibold">หักลบ (กยศ. / ปกส. / ฯลฯ)</span>
                                                             <span className="text-base font-bold font-mono text-rose-500 shrink-0">- ฿{fmt(s?.deductions?.totalDeduction || 0)}</span>
                                                         </div>
 

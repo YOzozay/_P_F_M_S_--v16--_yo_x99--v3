@@ -363,7 +363,7 @@ export default function OTTrackerPage() {
 
                 {/* ── Deductions ── */}
                 <div className="flex justify-between text-slate-600 dark:text-slate-300 pt-1">
-                  <span>เงินสมทบประกันสังคม <span className="text-slate-400 dark:text-slate-500 text-xs">(จากเงินเดือนฐาน, สูงสุด ฿750)</span>:</span>
+                  <span>เงินสมทบประกันสังคม <span className="text-slate-400 dark:text-slate-500 text-xs">(จากเงินเดือนฐาน, สูงสุด ฿{fmt((Number(config.social_security_max_base) || 15000) * (Number(config.social_security_rate) || 0.05))})</span>:</span>
                   <span className="font-bold text-rose-500">-฿{fmt(payroll.socialSecurity)}</span>
                 </div>
                 {payroll.studentLoan > 0 && (
