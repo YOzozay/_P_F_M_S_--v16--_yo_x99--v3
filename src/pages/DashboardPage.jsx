@@ -309,7 +309,7 @@ export default function DashboardPage() {
     };
 
     // ── Derived values ────────────────────────────────────────
-    const grossMonthlyIncome = summary?.income?.totalGross || 0;
+    const grossMonthlyIncome = summary?.income?.grossIncome || summary?.income?.totalGross || 0;
     const totalDebt = healthData?.totalDebt || 0;
     const dtiPct = grossMonthlyIncome > 0 ? (totalDebt / grossMonthlyIncome) * 100 : 0;
     const dtiStyle = getDtiColor(dtiPct);
@@ -502,16 +502,16 @@ export default function DashboardPage() {
                                                             </div>
                                                         </div>
 
-                                                        <div className="flex gap-6 items-center flex-wrap sm:flex-nowrap">
-                                                            <div className="flex flex-col items-center justify-center shrink-0">
-                                                                <div className={`relative w-24 h-24 rounded-full ring-4 ${dtiStyle.ring} ring-offset-2 ring-offset-white dark:ring-offset-slate-800 flex items-center justify-center flex-col bg-slate-50 dark:bg-slate-900/50`}>
-                                                                    <span className={`text-xl font-black font-mono ${dtiStyle.text}`}>{dtiPct.toFixed(1)}%</span>
-                                                                    <span className={`text-[10px] font-bold ${dtiStyle.text}`}>{dtiStyle.label}</span>
+                                                        <div className="flex flex-col sm:flex-row gap-6 items-center w-full">
+                                                            <div className="flex flex-col items-center justify-center shrink-0 mb-2 sm:mb-0 scale-90 sm:scale-100 origin-center sm:origin-left">
+                                                                <div className={`relative w-20 h-20 sm:w-24 sm:h-24 rounded-full ring-4 ${dtiStyle.ring} ring-offset-2 ring-offset-white dark:ring-offset-slate-800 flex items-center justify-center flex-col bg-slate-50 dark:bg-slate-900/50`}>
+                                                                    <span className={`text-xl sm:text-xl font-black font-mono ${dtiStyle.text}`}>{dtiPct.toFixed(1)}%</span>
+                                                                    <span className={`text-[10px] sm:text-[10px] font-bold ${dtiStyle.text}`}>{dtiStyle.label}</span>
                                                                 </div>
-                                                                <div className="text-[10px] text-slate-500 dark:text-slate-400 font-semibold mt-3 text-center">เป้าหมาย &lt; 36%</div>
+                                                                <div className="text-[10px] sm:text-[10px] text-slate-500 dark:text-slate-400 font-semibold mt-3 text-center">เป้าหมาย &lt; 36%</div>
                                                             </div>
 
-                                                            <div className="flex-1 grid grid-cols-2 gap-2 min-w-0">
+                                                            <div className="flex-1 w-full grid grid-cols-2 gap-2.5 min-w-0">
                                                                 {[
                                                                     { label: "รายได้รวม", value: mask(fmt(grossMonthlyIncome)), color: "text-emerald-600 dark:text-emerald-400" },
                                                                     { label: "หนี้รวม/เดือน", value: fmt(totalDebt), color: "text-rose-500" },
@@ -519,9 +519,9 @@ export default function DashboardPage() {
                                                                     { label: "ค่าใช้จ่ายคงที่", value: fmt(healthData?.totalBillDue || 0), color: "text-teal-500" },
                                                                     { label: "ผ่อน/บัตร", value: fmt(healthData?.totalCreditDue || 0), color: "text-amber-500" },
                                                                 ].map(item => (
-                                                                    <div key={item.label} className="bg-slate-50 dark:bg-slate-900/40 rounded-lg p-2.5">
-                                                                        <div className="text-[10px] text-slate-500 dark:text-slate-400 mb-0.5 truncate">{item.label}</div>
-                                                                        <div className={`font-bold font-mono text-xs ${item.color}`}>฿{item.value}</div>
+                                                                    <div key={item.label} className="bg-slate-50 dark:bg-slate-900/40 rounded-xl p-3 flex flex-col items-center sm:items-start text-center sm:text-left justify-center overflow-hidden">
+                                                                        <div className="text-[11px] sm:text-[10px] text-slate-500 dark:text-slate-400 mb-1 truncate w-full">{item.label}</div>
+                                                                        <div className={`font-bold font-mono text-sm sm:text-xs ${item.color} truncate w-full`}>฿{item.value}</div>
                                                                     </div>
                                                                 ))}
                                                             </div>

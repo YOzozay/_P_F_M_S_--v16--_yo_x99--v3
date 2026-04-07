@@ -1,0 +1,1006 @@
+const SHEET_ID = "15MSckPK_qy5zcG9AjvNeiW0KNWcVkZm8bUN8pO2ow14";
+
+/* =========================
+   OPTIONS & ROUTING
+========================= */
+function doOptions() {
+  return ContentService.createTextOutput("").setMimeType(ContentService.MimeType.TEXT);
+}
+
+function doGet(e) {
+  if (!e) return output({ error: "No event object" });
+  const action = e.parameter?.action;
+
+  if (action === "summary")               return output(getMonthlySummary(e.parameter.payMonth));
+  if (action === "yearSummary")           return output(getYearSummary(e.parameter.year));
+  if (action === "getExpenses")           return output(getExpenses(e.parameter.payMonth));
+  if (action === "getWorklogs")           return output(getWorklogs(e.parameter.payMonth));
+  if (action === "getExpenseMeta")        return output(getExpenseMeta());
+  if (action === "getCreditSummary")      return output(getCreditSummary());
+  if (action === "getCreditStatement")    return output(getCreditStatement(e.parameter.card_id, e.parameter.year, e.parameter.month));
+  if (action === "getDebts")              return output(getDebts());
+  if (action === "getInstallments")       return output(getInstallments());
+  if (action === "getFixedList")          return output(getFixedList());
+  if (action === "getConfig")             return output(getConfig());
+  if (action === "getSalaryHistory")      return output(getSalaryHistory());
+  if (action === "getUpcomingInstallments") return output(getUpcomingInstallments());
+  if (action === "getCreditCards")        return output(getCreditCards());
+  if (action === "getCarLoans")           return output(getLoans("car_loan"));
+  if (action === "getHomeLoans")          return output(getLoans("home_loan"));
+
+  return output({ status: "API running" });
+}
+
+function doPost(e) {
+  if (!e || !e.postData) return output({ error: "No postData received" });
+  const data = JSON.parse(e.postData.contents);
+
+  if (data.action === "getDuePayments")            return output(getDuePayments());
+  if (data.action === "processPayment")            return output(processPayment(data));
+  if (data.action === "addWorklog")                return addWorklog(data);
+  if (data.action === "addExpense")                return addExpense(data);
+  if (data.action === "deleteExpense")             return deleteExpense(data);
+  if (data.action === "deleteWorklog")             return deleteWorklog(data);
+  if (data.action === "createCreditTransaction")   return createCreditTransaction(data);
+  if (data.action === "createCreditCard")          return createCreditCard(data);
+  if (data.action === "payCreditInstallment")      return payCreditInstallment(data);
+  if (data.action === "payDebt")                   return payDebt(data);
+  if (data.action === "addFixedExpense")           return addFixedExpense(data);
+  if (data.action === "deleteFixedExpense")        return deleteFixedExpense(data);
+  if (data.action === "toggleFixedExpense")        return toggleFixedExpense(data);
+  if (data.action === "updateConfig")              return updateConfig(data);
+  if (data.action === "addSalaryHistory")          return addSalaryHistory(data);
+  if (data.action === "addDebt")                   return addDebt(data);
+  if (data.action === "deleteDebt")                return deleteDebt(data);
+  if (data.action === "cancelCreditTransaction")   return cancelCreditTransaction(data);
+  if (data.action === "addLoan")                   return addLoan(data);
+  if (data.action === "payLoan")                   return payLoan(data);
+  if (data.action === "deleteLoan")                return deleteLoan(data);
+  if (data.action === "updateLoanRate")            return updateLoanRate(data);
+  if (data.action === "payFixedExpense") return payFixedExpense(data);
+
+  return output({ error: "Invalid action: " + data.action });
+}
+
+/* =========================
+   UTILS
+========================= */
+function output(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
+}
+
+function round2(n) {
+  return Math.round((n + Number.EPSILON) * 100) / 100;
+}
+
+function fmt_date(d) {
+  return Utilities.formatDate(new Date(d), "Asia/Bangkok", "yyyy-MM-dd");
+}
+
+/* =========================
+   CONFIG & SALARY
+========================= */
+function getConfig() {
+  const rows = SpreadsheetApp.openById(SHEET_ID).getSheetByName("system_config").getDataRange().getValues();
+  rows.shift();
+  const cfg = {};
+  rows.forEach(r => { cfg[r[0]] = Number(r[1]); });
+  return cfg;
+}
+
+function updateConfig(data) {
+  const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName("system_config");
+  const rows = sheet.getDataRange().getValues();
+  for (let i = 1; i < rows.length; i++) {
+    if (data[rows[i][0]] !== undefined) {
+      sheet.getRange(i + 1, 2).setValue(Number(data[rows[i][0]]));
+    }
+  }
+  return output({ status: "updated" });
+}
+
+function getSalaryForMonth(targetDate) {
+  const rows = SpreadsheetApp.openById(SHEET_ID).getSheetByName("salary_history").getDataRange().getValues();
+  rows.shift();
+  rows.sort((a, b) => new Date(a[0]) - new Date(b[0]));
+  let salary = 0;
+  rows.forEach(r => { if (new Date(r[0]) <= targetDate) salary = Number(r[1]); });
+  return salary;
+}
+
+function getSalaryHistory() {
+  const rows = SpreadsheetApp.openById(SHEET_ID).getSheetByName("salary_history").getDataRange().getValues();
+  rows.shift();
+  return rows.map(r => ({ effective_date: fmt_date(r[0]), salary: Number(r[1]) })).reverse();
+}
+
+function addSalaryHistory(data) {
+  const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName("salary_history");
+  sheet.appendRow([new Date(data.effective_date), Number(data.salary)]);
+  return output({ status: "added" });
+}
+
+function getPayPeriod(year, month) {
+  return {
+    startDate: new Date(year, month - 2, 21, 0, 0, 0),
+    endDate:   new Date(year, month - 1, 20, 23, 59, 59)
+  };
+}
+
+/* =========================
+   EXPENSES
+========================= */
+// 2. ดึงค่ารหัสอ้างอิง (source_id) มาให้ Frontend ด้วย (อยู่ที่ r[6])
+function getExpenses(payMonth) {
+  if (!payMonth) return { error: "payMonth required" };
+  const [year, month] = payMonth.split("-").map(Number);
+  const { startDate, endDate } = getPayPeriod(year, month);
+  const rows = SpreadsheetApp.openById(SHEET_ID).getSheetByName("expenses").getDataRange().getValues();
+  rows.shift();
+  return rows
+    // ✅ เพิ่ม source_id: r[6] เข้ามา เพื่อใช้จับคู่แบบเป๊ะๆ 100%
+    .map(r => ({ id: r[0], rawDate: new Date(r[1]), date: fmt_date(r[1]), category: r[2], amount: Number(r[3]) || 0, payment_method: r[4] || "", note: r[5] || "", source_id: String(r[6] || "").trim() }))
+    .filter(i => i.rawDate >= startDate && i.rawDate <= endDate)
+    .reverse();
+}
+
+function addExpense(data) {
+  const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName("expenses");
+  const id = Utilities.getUuid();
+  sheet.appendRow([id, new Date(data.date), data.category, Number(data.amount), data.payment_method || "", data.note || "", "", "manual", new Date()]);
+  return output({ status: "success", id });
+}
+
+function deleteExpense(data) {
+  const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName("expenses");
+  const rows = sheet.getDataRange().getValues();
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]) === String(data.id)) { sheet.deleteRow(i + 1); break; }
+  }
+  return output({ status: "deleted" });
+}
+
+function getExpenseMeta() {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const rows = ss.getSheetByName("meta").getDataRange().getValues();
+  const categories = [], paymentMethods = [];
+  rows.forEach((r) => {
+    if (r[0] === "category") categories.push(r[1]);
+    if (r[0] === "payment") paymentMethods.push(r[1]);
+  });
+  
+  // ✅ ดึงรายชื่อบัตรเครดิตทั้งหมดมาด้วย
+  const cardRows = ss.getSheetByName("credit_cards").getDataRange().getValues();
+  cardRows.shift();
+  const creditCards = cardRows.map(r => ({ id: String(r[0]).trim(), name: r[1] }));
+
+  return { categories, paymentMethods, creditCards };
+}
+
+function getExpensesForPeriod(startDate, endDate) {
+  const rows = SpreadsheetApp.openById(SHEET_ID).getSheetByName("expenses").getDataRange().getValues();
+  rows.shift();
+  let total = 0;
+  const byCategory = {};
+  rows.forEach(r => {
+    const d = new Date(r[1]);
+    if (d >= startDate && d <= endDate) {
+      const amt = Number(r[3]) || 0;
+      total += amt;
+      byCategory[r[2]] = (byCategory[r[2]] || 0) + amt;
+    }
+  });
+  return { total: round2(total), byCategory };
+}
+
+function getFixedExpensesForPeriod(startDate, endDate) {
+  const rows = SpreadsheetApp.openById(SHEET_ID).getSheetByName("fixed_expenses").getDataRange().getValues();
+  rows.shift();
+  let total = 0;
+  const items = [];
+  rows.forEach(r => {
+    const active = String(r[5]).toLowerCase() === "true";
+    const start = r[3] ? new Date(r[3]) : null;
+    const end   = r[4] ? new Date(r[4]) : null;
+    if (!active || !start) return;
+    if (start <= endDate && (!end || end >= startDate)) {
+      total += Number(r[2]) || 0;
+      items.push({ name: r[1], amount: Number(r[2]) || 0 });
+    }
+  });
+  return { total: round2(total), items };
+}
+
+/* =========================
+   WORKLOGS
+========================= */
+function getWorklogs(payMonth) {
+  if (!payMonth) return { error: "payMonth required" };
+  const [year, month] = payMonth.split("-").map(Number);
+  const { startDate, endDate } = getPayPeriod(year, month);
+  const rows = SpreadsheetApp.openById(SHEET_ID).getSheetByName("work_logs").getDataRange().getValues();
+  rows.shift();
+  return rows
+    .map(r => ({ id: r[0], rawDate: new Date(r[1]), date: fmt_date(r[1]), holiday_hours: Number(r[2]) || 0, ot15: Number(r[3]) || 0, ot3: Number(r[4]) || 0, note: r[5] || "" }))
+    .filter(i => i.rawDate >= startDate && i.rawDate <= endDate)
+    .reverse();
+}
+
+function addWorklog(data) {
+  const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName("work_logs");
+  const id = Utilities.getUuid();
+  sheet.appendRow([id, new Date(data.date), Number(data.holiday_hours) || 0, Number(data.ot_evening_1_5x) || 0, Number(data.ot_evening_3x) || 0, data.note || ""]);
+  return output({ status: "success", id });
+}
+
+function deleteWorklog(data) {
+  const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName("work_logs");
+  const rows = sheet.getDataRange().getValues();
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]) === String(data.id)) { sheet.deleteRow(i + 1); break; }
+  }
+  return output({ status: "deleted" });
+}
+
+/* =========================
+   SUMMARY
+========================= */
+function getMonthlySummary(monthStr) {
+  if (!monthStr) return { error: "payMonth required (YYYY-MM)" };
+  const cfg = getConfig();
+  const [year, month] = monthStr.split("-").map(Number);
+  const { startDate, endDate } = getPayPeriod(year, month);
+
+  // --- 1. คำนวณรายได้ และ OT (ใช้ Logic เดิมของคุณพี่) ---
+  const rows = SpreadsheetApp.openById(SHEET_ID).getSheetByName("work_logs").getDataRange().getValues();
+  rows.shift();
+
+  let workDays = 0, otMealDays = 0, holidayHours = 0, ot15 = 0, ot3 = 0;
+  rows.forEach(r => {
+    const d = new Date(r[1]);
+    if (d >= startDate && d <= endDate) {
+      workDays++;
+      const h = Number(r[2]) || 0;
+      const h15 = Number(r[3]) || 0;
+      const h3  = Number(r[4]) || 0;
+      holidayHours += h;
+      ot15 += h15;
+      ot3  += h3;
+      if ((h15 + h3) >= cfg.ot_meal_threshold_hours) otMealDays++;
+    }
+  });
+
+  const monthlySalary = getSalaryForMonth(endDate);
+  const hourlyRate    = (monthlySalary / cfg.salary_divisor_days) / cfg.work_hours_per_day;
+  const otPay         = round2((holidayHours * hourlyRate * cfg.ot_multiplier_1) + (ot15 * hourlyRate * cfg.ot_multiplier_1_5) + (ot3 * hourlyRate * cfg.ot_multiplier_3));
+  const mealNormal    = workDays * cfg.meal_normal_per_day;
+  const mealOt        = otMealDays * cfg.meal_ot_per_day;
+  const fuel          = workDays * cfg.fuel_per_day;
+  const diligenceAllowance = cfg.diligence_allowance || 0; 
+  
+  const grossIncome   = round2(monthlySalary + otPay + mealNormal + mealOt + fuel + diligenceAllowance);
+  
+  const ssBase         = Math.min(monthlySalary, cfg.social_security_max_base);
+  const socialSecurity = round2(ssBase * cfg.social_security_rate);
+  const studentLoan   = cfg.student_loan_fixed || 0;
+  const totalDeduction = socialSecurity + studentLoan;
+  const netIncome      = round2(grossIncome - totalDeduction);
+
+  // --- 2. คำนวณรายจ่ายทั่วไป ---
+  const varExp   = getExpensesForPeriod(startDate, endDate);
+  const fixedExp = getFixedExpensesForPeriod(startDate, endDate);
+
+  // --- 3. เพิ่มการคำนวณ "หนี้สิน" (Loans & Installments) ---
+  // ดึงยอดหนี้รถ/บ้าน
+  const carLoans = getLoans("car_loan");
+  const homeLoans = getLoans("home_loan");
+  const totalLoanMonthly = [...carLoans, ...homeLoans]
+    .filter(l => l.status === "active")
+    .reduce((sum, l) => sum + (Number(l.monthly_due) || 0), 0);
+
+  // ดึงยอดผ่อนบัตรเครดิต
+  const installments = getInstallments();
+  const totalCreditMonthly = installments
+    .filter(i => i.status === "active" || i.status === "unpaid") // กรองเอาเฉพาะที่ยังต้องจ่าย
+    .reduce((sum, i) => sum + (Number(i.amount) || 0), 0);
+
+  // คำนวณหนี้รวม (สำหรับ DTI)
+  const totalMonthlyDebt = round2(totalLoanMonthly + totalCreditMonthly + fixedExp.total);
+  const dtiPercent = grossIncome > 0 ? round2((totalMonthlyDebt / grossIncome) * 100) : 0;
+
+  // --- 4. ส่งผลลัพธ์กลับแบบครบถ้วน ---
+  return {
+    payMonth: monthStr,
+    period: { startDate: fmt_date(startDate), endDate: fmt_date(endDate) },
+    income: { 
+      monthlySalary, otPay, mealNormal, mealOt, fuel, 
+      diligenceAllowance, grossIncome 
+    },
+    deductions: { socialSecurity, studentLoan, totalDeduction },
+    netIncome,
+    // ส่วนที่เพิ่มใหม่เพื่อให้หน้าบ้านโชว์ DTI ได้
+    debtBreakdown: {
+      loans: round2(totalLoanMonthly),
+      credits: round2(totalCreditMonthly),
+      fixed: round2(fixedExp.total),
+      totalDebt: totalMonthlyDebt,
+      dti: dtiPercent
+    },
+    expenses: { variable: varExp, fixed: fixedExp, totalExpenses: round2(varExp.total + fixedExp.total) },
+    // แก้ไข Net Balance ให้หักหนี้ออกจริงๆ
+    netBalance: round2(netIncome - totalMonthlyDebt - varExp.total)
+  };
+}
+
+function getYearSummary(yearStr) {
+  const year = Number(yearStr);
+  const results = [];
+  for (let m = 1; m <= 12; m++) {
+    const monthStr = `${year}-${String(m).padStart(2, "0")}`;
+    const s = getMonthlySummary(monthStr);
+    results.push({ payMonth: monthStr, netIncome: s.netIncome || 0, totalExpenses: s.expenses?.totalExpenses || 0, netBalance: s.netBalance || 0 });
+  }
+  return results;
+}
+
+/* =========================
+   FIXED EXPENSES
+========================= */
+function getFixedList() {
+  const rows = SpreadsheetApp.openById(SHEET_ID).getSheetByName("fixed_expenses").getDataRange().getValues();
+  rows.shift();
+  return rows.map(r => ({
+    id: r[0],
+    name: r[1],
+    amount: Number(r[2]) || 0,
+    start_date: r[3] ? fmt_date(r[3]) : "",  // ← FIX: added
+    end_date:   r[4] ? fmt_date(r[4]) : "",  // ← FIX: added
+    active: String(r[5]).toLowerCase() === "true",
+    created_at: r[6] ? fmt_date(r[6]) : ""   // ← FIX: added
+  }));
+}
+
+function addFixedExpense(data) {
+  const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName("fixed_expenses");
+  sheet.appendRow([
+    Utilities.getUuid(), data.name, Number(data.amount) || 0,
+    data.start_date ? new Date(data.start_date) : new Date(),
+    data.end_date   ? new Date(data.end_date)   : "",
+    true, new Date()
+  ]);
+  return output({ status: "added" });
+}
+
+function deleteFixedExpense(data) {
+  const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName("fixed_expenses");
+  const rows = sheet.getDataRange().getValues();
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]) === String(data.id)) { sheet.deleteRow(i + 1); break; }
+  }
+  return output({ status: "deleted" });
+}
+
+function toggleFixedExpense(data) {
+  const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName("fixed_expenses");
+  const rows = sheet.getDataRange().getValues();
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]) === String(data.id)) {
+      const current = String(rows[i][5]).toLowerCase() === "true";
+      sheet.getRange(i + 1, 6).setValue(!current);
+      break;
+    }
+  }
+  return output({ status: "toggled" });
+}
+
+/* =========================
+   DEBTS
+========================= */
+function getDebts() {
+  const rows = SpreadsheetApp.openById(SHEET_ID).getSheetByName("debts").getDataRange().getValues();
+  rows.shift();
+  return rows.map(r => ({
+    id: r[0],
+    name: r[1],
+    total_amount: Number(r[2]) || 0,
+    monthly_due: Number(r[3]) || 0,
+    due_day: Number(r[4]) || 0,       // ← FIX: added
+    remaining_amount: Number(r[5]) || 0,
+    start_date: r[6] ? fmt_date(r[6]) : "",
+    status: r[7] || "active",
+    created_at: r[8] ? fmt_date(r[8]) : ""
+  }));
+}
+
+function addDebt(data) {
+  const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName("debts");
+  sheet.appendRow([
+    Utilities.getUuid(), data.name, Number(data.total_amount) || 0,
+    Number(data.monthly_due) || 0, Number(data.due_day) || 1,
+    Number(data.total_amount) || 0,  // remaining = full initially
+    new Date(), "active", new Date()
+  ]);
+  return output({ status: "added" });
+}
+
+function deleteDebt(data) {
+  const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName("debts");
+  const rows = sheet.getDataRange().getValues();
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]) === String(data.id)) { sheet.deleteRow(i + 1); break; }
+  }
+  return output({ status: "deleted" });
+}
+
+function payDebt(data) {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName("debts");
+  const rows = sheet.getDataRange().getValues();
+  const payAmt = Number(data.amount);
+
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]).trim() !== String(data.debt_id).trim()) continue;
+    if (rows[i][7] === "closed") return output({ error: "Debt already closed" });
+
+    const remaining = Number(rows[i][5]) || 0;
+    if (payAmt > remaining) return output({ error: "Payment exceeds remaining amount" });
+
+    const newRem = round2(remaining - payAmt);
+    sheet.getRange(i + 1, 6).setValue(newRem);
+    if (newRem <= 0) sheet.getRange(i + 1, 8).setValue("closed");
+
+    ss.getSheetByName("expenses").appendRow([
+      Utilities.getUuid(), new Date(), "debt_payment", payAmt,
+      "Transfer", `Debt: ${rows[i][1]}`, data.debt_id, "debt", new Date()
+    ]);
+    return output({ status: "success", remaining: newRem });
+  }
+  return output({ error: "Debt not found" });
+}
+
+// ==========================================
+// 1. ฟังก์ชันดึงข้อมูล (คืนค่าเป็น Array เพียวๆ)
+// ==========================================
+function getLoans(type) {
+  // ✅ ใช้ openById เพื่อให้ API หาไฟล์ชีตเจอเสมอ
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName("loans"); 
+  
+  // ✅ คืนค่าเป็น Array เปล่าๆ (ไม่ต้องใส่ output() แล้ว เพราะ doGet ใส่ให้แล้ว)
+  if (!sheet) return []; 
+  
+  const data = sheet.getDataRange().getValues();
+  if (data.length <= 1) return []; 
+  
+  data.shift(); // ลบ header
+  
+  return data
+    .filter(row => row[2] === type && row[14] === "active")
+    .map(row => ({
+      id: row[0],
+      name: row[1],
+      lender: row[3],
+      total_amount: row[4],
+      interest_rate: Number(row[5]) || 0, // ✅ ดึงอัตราดอกเบี้ยปัจจุบันมาใช้
+      monthly_due: row[6],
+      due_day: row[7],
+      total_installments: row[8],
+      paid_installments: row[9],
+      remaining_amount: row[10],
+      remaining_months: row[11],
+      start_date: row[12] ? String(row[12]) : "", 
+      end_date: row[13] ? String(row[13]) : "",
+      status: row[14]
+    }));
+}
+
+// ==========================================
+// 2. ฟังก์ชันบันทึกสัญญาย้อนหลัง
+// ==========================================
+/* =========================
+   LOANS (เงินกู้รถ/บ้าน)
+========================= */
+function addLoan(data) {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName("loans");
+  const paySheet = ss.getSheetByName("loan_payments");
+  
+  const { loan_type, name, lender, total_amount, monthly_due, total_installments, paid_installments, start_date, remaining_amount } = data;
+  
+  const id = Utilities.getUuid();
+  const totalAmt = Number(total_amount) || 0;
+  const monthly = Number(monthly_due) || 0;
+  const paidCount = Number(paid_installments) || 0;
+  const startDate = new Date(start_date);
+  
+  // คำนวณยอดหนี้คงเหลือปัจจุบันอัตโนมัติ (ถ้ายอดที่ส่งมาเป็น 0 หรือไม่มี)
+  let currentRemainingAmt = Number(remaining_amount);
+  if (!currentRemainingAmt || currentRemainingAmt <= 0) {
+    currentRemainingAmt = totalAmt - (paidCount * monthly);
+  }
+
+  // 1. บันทึกข้อมูลเงินกู้หลัก
+  sheet.appendRow([
+    id, loan_type, name, lender, totalAmt, monthly, 
+    Number(total_installments) || 0, 
+    paidCount, // เริ่มต้นด้วยจำนวนงวดที่จ่ายไปแล้ว
+    currentRemainingAmt,
+    start_date, "active", new Date()
+  ]);
+
+  // 2. สร้างประวัติการจ่ายเงินย้อนหลัง (เพื่อให้กราฟและ Progress Bar ถูกต้อง)
+  if (paidCount > 0 && paySheet) {
+    const pastPrincipalPerMonth = monthly; // สมมติเป็นการหักเงินต้นแบบคงที่เบื้องต้น
+    for (let i = 0; i < paidCount; i++) {
+      let payDate = new Date(startDate);
+      payDate.setMonth(payDate.getMonth() + i); 
+      
+      paySheet.appendRow([
+        Utilities.getUuid(), 
+        id, 
+        monthly, 
+        pastPrincipalPerMonth, 
+        0, // ดอกเบี้ย (สมมติเป็น 0 ในการลงย้อนหลัง)
+        payDate, 
+        i + 1, // งวดที่
+        new Date()
+      ]);
+    }
+  }
+
+  return output({ success: true, id });
+}
+
+/* =========================
+   CREDIT CARD INSTALLMENTS (รายการรูดผ่อนบัตร)
+========================= */
+function addCreditInstallment(data) {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName("credit_installments");
+  const paySheet = ss.getSheetByName("credit_payments"); // ชีตเก็บประวัติการจ่ายบัตร
+  
+  const { card_id, itemName, totalAmount, totalMonths, amount, category, firstPaymentDate, paid_installments } = data;
+  
+  const id = Utilities.getUuid();
+  const paidCount = Number(paid_installments) || 0;
+  const firstDate = new Date(firstPaymentDate);
+  const monthlyAmt = Number(amount) || 0;
+
+  // 1. บันทึกข้อมูลการผ่อนหลัก
+  sheet.appendRow([
+    id, card_id, itemName, category, 
+    Number(totalAmount) || 0, 
+    Number(totalMonths) || 0, 
+    monthlyAmt, 
+    firstPaymentDate, 
+    "active", 
+    new Date()
+  ]);
+
+  // 2. สร้างประวัติการจ่ายเงินย้อนหลัง (ถ้าผ่อนมาแล้วบางส่วน)
+  if (paidCount > 0 && paySheet) {
+    for (let i = 0; i < paidCount; i++) {
+      let payDate = new Date(firstDate);
+      payDate.setMonth(payDate.getMonth() + i);
+      
+      // บันทึกสถานะ "ชำระแล้ว" ลงในประวัติ
+      paySheet.appendRow([
+        Utilities.getUuid(), 
+        id, 
+        payDate, 
+        new Date() // timestamp
+      ]);
+    }
+  }
+
+  return output({ success: true, id });
+}
+
+function payLoan(data) {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName("loans");
+  const paySheet = ss.getSheetByName("loan_payments");
+
+  if (!sheet) return output({ error: "loans sheet not found" });
+
+  const loanId  = String(data.loan_id || data.id || "").trim();
+  const loanType = String(data.loan_type || "").toLowerCase().trim();
+  
+  // ✅ ตรวจสอบยอดจากหน้าบ้าน
+  const payAmt  = Number(data.amount);
+  const principal = data.principal !== undefined ? Number(data.principal) : payAmt;
+  const interest  = data.interest !== undefined ? Number(data.interest) : 0;
+  
+  if (!payAmt || payAmt <= 0) return output({ error: "Invalid amount" });
+
+  const rows = sheet.getDataRange().getValues();
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]).trim() !== loanId) continue;
+    if (String(rows[i][2]).toLowerCase().trim() !== loanType) continue;
+    if (rows[i][14] === "closed") return output({ error: "Loan already closed" });
+
+    const remAmt  = Number(rows[i][10]) || 0;
+    const remMon  = Number(rows[i][11]) || 0;
+    const paidInst = Number(rows[i][9]) || 0;
+
+    // ✅ ถ้างวดบ้าน ให้หักลบยอดหนี้ด้วย "เงินต้น" ถ้างวดรถหักด้วย "ยอดจ่ายเต็ม"
+    const deductAmount = loanType === "home_loan" ? principal : payAmt;
+
+    if (deductAmount > remAmt + 1) return output({ error: "เงินต้นที่ชำระเกินยอดหนี้คงเหลือ" });
+
+    const newRemAmt = round2(Math.max(0, remAmt - deductAmount));
+    const newRemMon = Math.max(0, remMon - 1);
+    const newPaidInst = paidInst + 1; 
+
+    // 1. อัปเดตข้อมูลสัญญาในชีต loans
+    sheet.getRange(i + 1, 11).setValue(newRemAmt);   // K: remaining_amount
+    sheet.getRange(i + 1, 12).setValue(newRemMon);   // L: remaining_months
+    sheet.getRange(i + 1, 10).setValue(newPaidInst); // J: paid_installments
+    if (newRemAmt <= 0) sheet.getRange(i + 1, 15).setValue("closed");  // O: status
+
+    // 2. บันทึกลง expenses เพื่อไปคำนวณหักลบใน Dashboard
+    const category = loanType === "car_loan" ? "car_payment" : "home_payment";
+    ss.getSheetByName("expenses").appendRow([
+      Utilities.getUuid(), new Date(), category, payAmt,
+      rows[i][3] || "",   
+      `Loan Pay: ${rows[i][1]} ${interest > 0 ? `(ดอกเบี้ย ${interest}฿)` : ""}`,
+      loanId, loanType, new Date()
+    ]);
+
+    // 3. บันทึกลง loan_payments เพื่อเก็บประวัติแยกต้น-ดอก
+    if (paySheet) {
+      paySheet.appendRow([
+        Utilities.getUuid(), // id
+        loanId,              // loan_id
+        payAmt,              // amount (ยอดจ่ายรวม)
+        principal,           // principal (เงินต้น)
+        interest,            // interest (ดอกเบี้ย)
+        new Date(),          // payment_date
+        newPaidInst,         // installment_no
+        new Date()           // created_at
+      ]);
+    }
+
+    return output({ status: "success", remaining: newRemAmt, remaining_months: newRemMon });
+  }
+  return output({ error: "Loan not found" });
+}
+
+function deleteLoan(data) {
+  const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName("loans");
+  if (!sheet) return output({ error: "loans sheet not found" });
+  const rows = sheet.getDataRange().getValues();
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]).trim() === String(data.id).trim()) {
+      sheet.deleteRow(i + 1);
+      return output({ status: "deleted" });
+    }
+  }
+  return output({ error: "Not found" });
+}
+
+// ==========================================
+// 3. ฟังก์ชันอัปเดตอัตราดอกเบี้ย (ใช้สำหรับงวดบ้าน)
+// ==========================================
+function updateLoanRate(data) {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName("loans");
+  if (!sheet) return output({ error: "loans sheet not found" });
+
+  const rows = sheet.getDataRange().getValues();
+  // รับ ID และลบเว้นวรรคออกเพื่อความแม่นยำ
+  const targetId = String(data.loan_id || "").trim(); 
+  
+  for (let i = 1; i < rows.length; i++) {
+    // เปรียบเทียบ ID (คอลัมน์ A คือ Index 0)
+    if (String(rows[i][0]).trim() === targetId) {
+      // อัปเดตที่แถว i+1, คอลัมน์ที่ 6 (F)
+      const newRate = Number(data.interest_rate);
+      sheet.getRange(i + 1, 6).setValue(newRate);
+      
+      return output({ status: "success", updated_rate: newRate });
+    }
+  }
+  return output({ error: "Loan not found: " + targetId });
+}
+
+/* =========================
+   CREDIT CARDS
+========================= */
+function getCreditCards() {
+  const rows = SpreadsheetApp.openById(SHEET_ID).getSheetByName("credit_cards").getDataRange().getValues();
+  rows.shift();
+  return rows.map(r => ({ id: String(r[0]).trim(), name: r[1], credit_limit: Number(r[2]) || 0, closing_day: Number(r[3]) || 0, due_day: Number(r[4]) || 0, active: String(r[5]) === "true" }));
+}
+
+function createCreditCard(data) {
+  const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName("credit_cards");
+  const id = Utilities.getUuid();
+  sheet.appendRow([id, data.name, Number(data.credit_limit) || 0, Number(data.closing_day) || 0, Number(data.due_day) || 0, true, new Date()]);
+  return output({ status: "created", card_id: id });
+}
+
+function getCreditSummary() {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const cardRows = ss.getSheetByName("credit_cards").getDataRange().getValues();
+  const instRows = ss.getSheetByName("credit_installments").getDataRange().getValues();
+  cardRows.shift(); instRows.shift();
+
+  return cardRows.map(card => {
+    const cardId = String(card[0]).trim();
+    const limit  = Number(card[2]) || 0;
+    const dueDay = Number(card[4]) || 0;
+
+    let totalUnpaid = 0;
+    let nextDueDate = null, nextDueAmt = 0, smallestNo = null;
+    instRows.forEach(inst => {
+      if (String(inst[2]).trim() !== cardId || inst[6] !== "unpaid") return;
+      totalUnpaid += Number(inst[4]) || 0;
+      const no = Number(inst[3]);
+      if (smallestNo === null || no < smallestNo) {
+        smallestNo = no; nextDueDate = inst[5]; nextDueAmt = Number(inst[4]) || 0;
+      }
+    });
+
+    const utilization = limit > 0 ? round2((totalUnpaid / limit) * 100) : 0;
+    return {
+      card_id: cardId,
+      name: card[1],
+      credit_limit: limit,
+      outstanding: round2(totalUnpaid),
+      available_credit: round2(limit - totalUnpaid),
+      utilization_percent: utilization,               // ← FIX: added
+      next_due_date: nextDueDate ? fmt_date(nextDueDate) : null,  // ← FIX: added
+      next_due_amount: nextDueAmt,                    // ← FIX: added
+      closing_day: Number(card[3]) || 0,
+      due_day: dueDay
+    };
+  });
+}
+
+function getCreditStatement(cardId, yearParam, monthParam) {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const cardRows = ss.getSheetByName("credit_cards").getDataRange().getValues();
+  const instRows = ss.getSheetByName("credit_installments").getDataRange().getValues();
+  cardRows.shift(); instRows.shift();
+
+  const card = cardRows.find(r => String(r[0]).trim() === String(cardId).trim());
+  if (!card) return { error: "Card not found" };
+
+  const closingDay = Number(card[3]);
+  const dueDay     = Number(card[4]);
+  const year  = Number(yearParam);
+  const month = Number(monthParam) - 1; // JS 0-indexed
+
+  const periodEnd   = new Date(year, month, closingDay);
+  const periodStart = new Date(year, month - 1, closingDay + 1);
+  const dueDate     = new Date(year, month + 1, dueDay);
+
+  let statementTotal = 0;
+  instRows.forEach(inst => {
+    if (String(inst[2]).trim() !== String(cardId).trim() || inst[6] !== "unpaid") return;
+    const due = new Date(inst[5]);
+    if (due > periodEnd && due <= dueDate) statementTotal += Number(inst[4]) || 0;
+  });
+
+  return {
+    card_id: cardId,
+    statement_period_start: fmt_date(periodStart),
+    statement_period_end:   fmt_date(periodEnd),
+    due_date: fmt_date(dueDate),
+    statement_total: round2(statementTotal)
+  };
+}
+
+function createCreditTransaction(data) {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const txId = Utilities.getUuid();
+  const now  = new Date();
+  
+  // ✅ 1. ถ้าไม่ได้ระบุจำนวนเดือน (จ่ายเต็ม) ให้ถือเป็น 1 งวด เพื่อให้ระบบสร้างยอดค้างชำระ (Unpaid)
+  const inputMonths = Number(data.installment_months) || 0;
+  const months = inputMonths <= 0 ? 1 : inputMonths; 
+
+  // บันทึกประวัติการรูด
+  ss.getSheetByName("credit_transactions").appendRow([
+    txId, data.card_id, data.type || "purchase", data.description,
+    Number(data.amount) || 0, new Date(data.transaction_date), months, "active", now
+  ]);
+
+  // หาข้อมูลรอบบัตรเครดิต
+  const perMonth = round2(Number(data.amount) / months);
+  const cardRows = ss.getSheetByName("credit_cards").getDataRange().getValues();
+  cardRows.shift();
+  const card = cardRows.find(r => String(r[0]).trim() === String(data.card_id).trim());
+  
+  // ถ้าไม่มีค่า Default ให้ตัดรอบวันที่ 25 และจ่ายวันที่ 15
+  const closingDay = card ? Number(card[3]) : 25;
+  const dueDay     = card ? Number(card[4]) : 15;
+
+  const txDate = new Date(data.transaction_date);
+  
+  // ✅ 2. สูตรคำนวณวันตัดรอบและวันจ่าย (แก้ไขใหม่ให้ตรงเป๊ะตามชีวิตจริง)
+  // - ถ้ารูดหลังวันตัดรอบ ให้ปัดเดือนตัดรอบไปเดือนหน้า
+  let statementMonth = txDate.getMonth() + (txDate.getDate() > closingDay ? 1 : 0);
+  
+  // - ถ้าวันจ่าย (Due) น้อยกว่าวันตัดรอบ (เช่น ตัด 25 จ่าย 15) แปลว่าต้องจ่ายเดือนถัดไป
+  // - แต่ถ้าวันจ่าย มากกว่าวันตัดรอบ (เช่น ตัด 12 จ่าย 30) แปลว่าจ่ายเดือนเดียวกับที่ตัดรอบ
+  let dueMonth = statementMonth + (dueDay < closingDay ? 1 : 0);
+  let dueYear  = txDate.getFullYear();
+
+  // เช็คข้ามปี
+  if (dueMonth > 11) {
+    dueMonth -= 12;
+    dueYear++;
+  }
+
+  // สร้างรายการผ่อนรายเดือนลงชีต Installments
+  const instSheet = ss.getSheetByName("credit_installments");
+  for (let i = 0; i < months; i++) {
+    let m = dueMonth + i, y = dueYear;
+    while (m > 11) { m -= 12; y++; } // เช็คข้ามปีเผื่อกรณีผ่อนหลายเดือน
+    
+    const due = new Date(y, m, dueDay);
+    instSheet.appendRow([Utilities.getUuid(), txId, data.card_id, i + 1, perMonth, due, "unpaid", ""]);
+  }
+
+  return output({ status: "created", transaction_id: txId });
+}
+
+function payCreditInstallment(data) {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const instSheet = ss.getSheetByName("credit_installments");
+  const rows = instSheet.getDataRange().getValues();
+
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]).trim() !== String(data.installment_id).trim()) continue;
+    if (rows[i][6] === "paid") return output({ error: "Already paid" });
+
+    instSheet.getRange(i + 1, 7).setValue("paid");
+    instSheet.getRange(i + 1, 8).setValue(new Date());
+
+    ss.getSheetByName("expenses").appendRow([
+      Utilities.getUuid(), new Date(), "credit_payment",
+      Number(rows[i][4]) || 0, "Installment", `งวดที่ ${rows[i][3]}`,
+      rows[i][1], "credit", new Date()
+    ]);
+    return output({ status: "success" });
+  }
+  return output({ error: "Installment not found" });
+}
+
+function cancelCreditTransaction(data) {
+  const ss  = SpreadsheetApp.openById(SHEET_ID);
+  const txId = String(data.transaction_id).trim();
+
+  // ลบ installments
+  const instSheet = ss.getSheetByName("credit_installments");
+  const instRows  = instSheet.getDataRange().getValues();
+  for (let i = instRows.length - 1; i >= 1; i--) {
+    if (String(instRows[i][1]).trim() === txId) instSheet.deleteRow(i + 1);
+  }
+
+  // ลบ expense ที่ผูกกับ transaction
+  const expSheet = ss.getSheetByName("expenses");
+  const expRows  = expSheet.getDataRange().getValues();
+  for (let i = expRows.length - 1; i >= 1; i--) {
+    if (String(expRows[i][6]).trim() === txId) expSheet.deleteRow(i + 1);
+  }
+
+  // ลบ transaction
+  const txSheet = ss.getSheetByName("credit_transactions");
+  const txRows  = txSheet.getDataRange().getValues();
+  for (let i = 1; i < txRows.length; i++) {
+    if (String(txRows[i][0]).trim() === txId) { txSheet.deleteRow(i + 1); break; }
+  }
+  return output({ status: "cancelled" });
+}
+
+/* =========================
+   INSTALLMENTS
+========================= */
+function getInstallments() {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const instRows = ss.getSheetByName("credit_installments").getDataRange().getValues();
+  const txRows   = ss.getSheetByName("credit_transactions").getDataRange().getValues();
+  const cardRows = ss.getSheetByName("credit_cards").getDataRange().getValues();
+  instRows.shift(); txRows.shift(); cardRows.shift();
+
+  const txMap   = {};
+  txRows.forEach(t => { txMap[String(t[0]).trim()] = { desc: t[3], months: Number(t[6]) || 0, total: Number(t[4]) || 0 }; });
+  const cardMap = {};
+  cardRows.forEach(c => { cardMap[String(c[0]).trim()] = c[1]; });
+
+  return instRows.map(r => {
+    const txId  = String(r[1]).trim();
+    const cardId = String(r[2]).trim();
+    return {
+      id:             r[0],
+      transaction_id: txId,
+      card_id:        cardId,
+      card_name:      cardMap[cardId] || "",   // ← FIX: added
+      description:    txMap[txId]?.desc || "",
+      total_amount:   txMap[txId]?.total || 0,
+      months:         txMap[txId]?.months || 0,
+      installment_no: Number(r[3]),
+      amount:         Number(r[4]) || 0,
+      due_date:       r[5] ? fmt_date(r[5]) : "",
+      status:         r[6]
+    };
+  });
+}
+
+// 1. ส่งรายการค้างจ่ายทั้งหมด โดยไม่สนใจวันที่
+function getUpcomingInstallments() {
+  const insts = getInstallments();
+  return insts
+    .filter(i => i.status === "unpaid") // ❌ เอาฟิลเตอร์วันที่ออกไปเลย
+    .sort((a, b) => new Date(a.due_date) - new Date(b.due_date));
+}
+
+/* =========================
+   PAYMENT CENTER
+========================= */
+function getDuePayments() {
+  // const debts = getDebts(); // ❌ ปิดการดึง Debt
+  const insts = getInstallments();
+  const result = [];
+
+  /*
+  debts.forEach(d => {
+    if (d.status !== "closed" && d.remaining_amount > 0) {
+      result.push({ type: "debt", source_id: d.id, title: d.name, subtitle: `Due day ${d.due_day}`, amount: d.monthly_due, due_date: "" });
+    }
+  });
+  */
+
+  const seenTx = {};
+  insts.filter(i => i.status === "unpaid")
+    .sort((a, b) => new Date(a.due_date) - new Date(b.due_date))
+    .forEach(i => {
+      if (!seenTx[i.transaction_id]) {
+        seenTx[i.transaction_id] = true;
+        result.push({ type: "installment", source_id: i.id, title: i.description, subtitle: `${i.card_name} (${i.installment_no}/${i.months})`, amount: i.amount, due_date: i.due_date });
+      }
+    });
+
+  ["car_loan", "home_loan"].forEach(type => {
+    getLoans(type).forEach(loan => {
+      if (loan.status !== "closed" && loan.remaining_amount > 0) {
+        result.push({ type, source_id: loan.id, title: loan.name, subtitle: `${loan.lender} · งวด ${loan.current_installment}/${loan.total_installments}`, amount: loan.monthly_due, due_date: "" });
+      }
+    });
+  });
+
+  return result;
+}
+
+function processPayment(data) {
+  const { type, source_id, amount } = data;
+  if (!amount || amount <= 0) return output({ error: "Invalid amount" });
+  if (type === "debt")        return payDebt({ debt_id: source_id, amount });
+  if (type === "installment") return payCreditInstallment({ installment_id: source_id });
+  if (type === "car_loan" || type === "home_loan") return payLoan({ loan_id: source_id, loan_type: type, amount });
+  return output({ error: "Unknown payment type: " + type });
+}
+
+function payFixedExpense(data) {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const expenseSheet = ss.getSheetByName("expenses");
+  
+  // บันทึกลงชีตรายจ่าย (Expenses)
+  const id = Utilities.getUuid();
+  expenseSheet.appendRow([
+    id, 
+    new Date(), 
+    "fixed_payment", // หมวดหมู่
+    Number(data.amount), 
+    "Transfer", // วิธีชำระเบื้องต้น
+    `บิลประจำ: ${data.name}`, 
+    data.id, // เก็บ ID ของ Fixed Expense ไว้เพื่อเช็คสถานะ
+    "fixed", 
+    new Date()
+  ]);
+  
+  return output({ status: "success", id });
+}
