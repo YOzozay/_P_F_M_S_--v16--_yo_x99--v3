@@ -79,7 +79,7 @@ export function calculatePayroll(config, otLogs, workingDays = 22) {
       fuel,
       totalAllowances,  // mealNormal + mealOT + fuel
       grossIncome,       // salary + otPay + totalAllowances  (True Gross, pre-deduction)
-      socialSecurity,    // หัก ประกันสังคม (from base salary only)
+      socialSecurity,    // เงินสมทบประกันสังคม (from base salary only)
       studentLoan,       // หัก กยศ. (fixed)
       totalDeductions,   // socialSecurity + studentLoan
       netIncome,         // grossIncome - totalDeductions

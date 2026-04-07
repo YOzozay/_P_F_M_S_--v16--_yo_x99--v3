@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { CreditCard, Calendar, ShoppingCart, RefreshCw, Plus, Trash2, FileText } from 'lucide-react';
+import { CreditCard, Calendar, ShoppingCart, RefreshCw, Plus, Trash2, FileText, X } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { apiGet, apiPost } from "../api/gsApi";
 import { fmt } from "../utils/formatters";
 import { FInput } from "../components/form/FInput";
+import { CustomDatePicker } from "../components/form/CustomDatePicker";
 import { CustomSelect } from "../components/form/CustomSelect";
 import { FormField } from "../components/form/FormField";
 export default function CombinedCreditPage() {
@@ -17,6 +18,7 @@ export default function CombinedCreditPage() {
   const [recurringBills, setRecurringBills] = useState([]);
   const [installments, setInstallments] = useState([]);
   const [fullPayments, setFullPayments] = useState([]);
+  const [selectedInstallment, setSelectedInstallment] = useState(null);
 
   // --- State สำหรับ Form ---
   const [cardForm, setCardForm] = useState({ name: '', credit_limit: '', closing_day: '', due_day: '' });
@@ -116,10 +118,10 @@ export default function CombinedCreditPage() {
     e.preventDefault();
     try {
       await apiPost({ action: "addFixedExpense", name: billForm.name, amount: billForm.amount, start_date: billForm.startDate });
-      showSuccessAlert('เพิ่มบิลประจำเรียบร้อยแล้ว');
+      showSuccessAlert('เพิ่มค่าใช้จ่ายคงที่เรียบร้อยแล้ว');
       loadAllData();
       setBillForm({ name: '', amount: '', startDate: '' });
-    } catch (e) { showErrorAlert(e.message || "สร้างบิลประจำไม่สำเร็จ"); }
+    } catch (e) { showErrorAlert(e.message || "สร้างค่าใช้จ่ายคงที่ไม่สำเร็จ"); }
   };
 
   const handleAddInstallment = async (e) => {
@@ -214,13 +216,13 @@ export default function CombinedCreditPage() {
       {/* Header Area */}
       <div>
         <h1 className="text-2xl font-bold text-slate-800 dark:text-white">Credit & Debts</h1>
-        <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">จัดการบัตรเครดิต บิลประจำ รูดเต็ม และคำนวณวันจ่ายอัตโนมัติ</p>
+        <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">จัดการบัตรเครดิต ค่าใช้จ่ายคงที่ รูดเต็ม และคำนวณวันจ่ายอัตโนมัติ</p>
       </div>
 
       {/* Tabs Container */}
       <div className="bg-slate-100 dark:bg-slate-900/50 p-1 rounded-xl flex gap-1 overflow-x-auto border border-slate-200 dark:border-slate-800">
         <TabButton id="cards" label="จัดการบัตร" icon={CreditCard} />
-        <TabButton id="recurring" label="บิลประจำ" icon={RefreshCw} />
+        <TabButton id="recurring" label="ค่าใช้จ่ายคงที่" icon={RefreshCw} />
         <TabButton id="installments" label="รูดผ่อน" icon={Calendar} />
         <TabButton id="full" label="รูดเต็ม" icon={ShoppingCart} />
       </div>
@@ -331,7 +333,7 @@ export default function CombinedCreditPage() {
                   </div>
                   <div className="flex gap-2">
                     <div className="flex-1">
-                      <FInput required label="วันที่เริ่มรอบบิล" type="date" value={billForm.startDate} onChange={v => setBillForm({...billForm, startDate: v})} />
+                      <CustomDatePicker required label="วันที่เริ่มรอบบิล" value={billForm.startDate} onChange={v => setBillForm({...billForm, startDate: v})} />
                     </div>
                     <button type="submit" className="h-[42px] px-4 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl flex items-center justify-center transition-colors">
                       <Plus size={20} />
@@ -365,7 +367,7 @@ export default function CombinedCreditPage() {
               <div className="space-y-6">
                  <form onSubmit={handleAddInstallment} className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-4 items-end">
                   <div>
-                    <FInput required label="วันที่รูด" type="date" value={installmentForm.date} onChange={v => setInstallmentForm({...installmentForm, date: v})} />
+                    <CustomDatePicker required label="วันที่รูด" value={installmentForm.date} onChange={v => setInstallmentForm({...installmentForm, date: v})} />
                   </div>
                   <div>
                     <FormField label="เลือกบัตร" required>
@@ -390,34 +392,54 @@ export default function CombinedCreditPage() {
                   </div>
                 </form>
 
-                <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700">
-                  <table className="w-full text-left text-sm">
-                    <thead className="bg-slate-50 dark:bg-slate-900/50 text-slate-500 dark:text-slate-400">
-                      <tr>
-                        <th className="p-3 font-medium">รายการ</th>
-                        <th className="p-3 font-medium">บัตร</th>
-                        <th className="p-3 font-medium">ผ่อน/เดือน</th>
-                        <th className="p-3 font-medium">รอจ่ายรอบบิลถัดไป</th>
-                        <th className="p-3 font-medium text-center">ลบ</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
-                      {installments.map(item => (
-                        <tr key={item.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition">
-                          <td className="p-3 text-slate-800 dark:text-slate-200 font-medium">{item.itemName} <div className="text-[10px] text-slate-400 font-normal">ยอดเต็ม ฿{parseFloat(item.totalAmount).toLocaleString()}</div></td>
-                          <td className="p-3 text-slate-600 dark:text-slate-300">{cards.find(c => String(c.card_id) === String(item.cardId))?.name || item.cardName}</td>
-                          <td className="p-3 font-bold text-amber-500">฿{parseFloat(item.installments[0]?.amount || 0).toLocaleString(undefined, {minimumFractionDigits: 2})} <span className="text-xs font-normal text-slate-400 dark:text-slate-500">({item.months}ด.)</span></td>
-                          <td className="p-3 text-slate-600 dark:text-slate-300">{item.installments.find(i => i.status === 'unpaid')?.due_date || "—"}</td>
-                          <td className="p-3 text-center">
-                            <button onClick={() => handleDelete('inst', item.id)} className="text-slate-400 hover:text-rose-500 transition"><Trash2 size={16}/></button>
-                          </td>
-                        </tr>
-                      ))}
-                      {installments.length === 0 && (
-                        <tr><td colSpan="5" className="p-6 text-center text-slate-400">ยังไม่มีรายการผ่อน</td></tr>
-                      )}
-                    </tbody>
-                  </table>
+                {/* Installment Grid */}
+                <div className="mt-8">
+                  <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-4 flex items-center gap-2">
+                    <ShoppingCart size={20} className="text-emerald-500" /> รายการผ่อนชำระบัตรเครดิต
+                  </h3>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {installments.map(item => {
+                      const cName = cards.find(c => String(c.card_id) === String(item.cardId))?.name || item.cardName;
+                      const paidCount = item.installments.filter(i => i.status === 'paid').length;
+                      const totalMonths = item.months;
+                      const progressPct = totalMonths === 0 ? 0 : Math.min((paidCount / totalMonths) * 100, 100);
+                      const monthAmount = parseFloat(item.installments[0]?.amount || 0);
+
+                      return (
+                        <div 
+                          key={item.id} 
+                          onClick={() => setSelectedInstallment(item)}
+                          className="bg-white dark:bg-slate-800 p-5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm hover:shadow-md transition-all cursor-pointer group hover:border-emerald-500/50"
+                        >
+                          <div className="flex justify-between items-start mb-3">
+                            <h4 className="font-bold text-slate-800 dark:text-slate-100 group-hover:text-emerald-500 transition-colors line-clamp-1">{item.itemName}</h4>
+                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 whitespace-nowrap ml-2">
+                              {cName}
+                            </span>
+                          </div>
+                          
+                          <div className="font-bold font-mono text-xl text-amber-500 mb-1.5">
+                            ฿{fmt(monthAmount)}
+                          </div>
+                          
+                          <div className="flex flex-col gap-1.5 mt-2">
+                            <div className="w-full h-1.5 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
+                              <div className="h-full bg-emerald-500 rounded-full transition-all" style={{ width: `${progressPct}%` }} />
+                            </div>
+                            <div className="text-xs font-semibold text-slate-500 dark:text-slate-400 text-right">
+                              ชำระมาแล้ว {paidCount}/{totalMonths} เดือน
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {installments.length === 0 && (
+                      <div className="md:col-span-2 text-center py-10 bg-slate-50 dark:bg-slate-900/50 rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 text-slate-400">
+                        ยังไม่มีรายการผ่อนชำระ
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
@@ -427,7 +449,7 @@ export default function CombinedCreditPage() {
               <div className="space-y-6">
                 <form onSubmit={handleAddFullPayment} className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-4 items-end">
                   <div>
-                    <FInput required label="วันที่รูด" type="date" value={fullPaymentForm.date} onChange={v => setFullPaymentForm({...fullPaymentForm, date: v})} />
+                    <CustomDatePicker required label="วันที่รูด" value={fullPaymentForm.date} onChange={v => setFullPaymentForm({...fullPaymentForm, date: v})} />
                   </div>
                   <div>
                     <FormField label="เลือกบัตร" required>
@@ -478,6 +500,93 @@ export default function CombinedCreditPage() {
           </>
         )}
       </div>
+
+      {/* Installment Detail Modal */}
+      {selectedInstallment && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm px-4">
+          <div className="bg-white dark:bg-slate-800 w-full max-w-md rounded-2xl shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            {/* Header */}
+            <div className="flex items-center justify-between p-4 border-b border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
+              <div>
+                <h3 className="font-bold text-slate-800 dark:text-white line-clamp-1">{selectedInstallment.itemName}</h3>
+                <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 font-medium">
+                  บัตร {cards.find(c => String(c.card_id) === String(selectedInstallment.cardId))?.name || selectedInstallment.cardName}
+                </div>
+              </div>
+              <button 
+                onClick={() => setSelectedInstallment(null)}
+                className="p-2 bg-slate-200 dark:bg-slate-700 rounded-full text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Content body */}
+            <div className="p-4 space-y-4">
+              {/* Stats Summary */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-indigo-50 dark:bg-indigo-900/20 p-3 rounded-xl border border-indigo-100 dark:border-indigo-800/50">
+                  <div className="text-[10px] uppercase font-bold text-indigo-500/80 dark:text-indigo-400 mb-1">ยอดเต็มทั้งหมด</div>
+                  <div className="font-mono font-bold text-indigo-700 dark:text-indigo-300 text-lg">฿{fmt(selectedInstallment.totalAmount)}</div>
+                </div>
+                <div className="bg-amber-50 dark:bg-amber-900/20 p-3 rounded-xl border border-amber-100 dark:border-amber-800/50">
+                  <div className="text-[10px] uppercase font-bold text-amber-500/80 dark:text-amber-400 mb-1">ยอดผ่อน / เดือน</div>
+                  <div className="font-mono font-bold text-amber-600 dark:text-amber-400 text-lg">฿{fmt(selectedInstallment.installments[0]?.amount || 0)}</div>
+                </div>
+                <div className="bg-slate-50 dark:bg-slate-900/50 p-3 rounded-xl border border-slate-200 dark:border-slate-700 col-span-2 flex items-center justify-between">
+                  <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">อัตราดอกเบี้ย:</span>
+                  <span className="text-sm font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-900/30 px-2 py-0.5 rounded border border-emerald-200 dark:border-emerald-800/50">0%</span>
+                </div>
+              </div>
+
+              {/* Installment Schedule */}
+              <div>
+                <h4 className="text-sm font-bold text-slate-700 dark:text-slate-300 mb-3 border-l-4 border-emerald-500 pl-2">ตารางงวด ({selectedInstallment.months} เดือน)</h4>
+                <div className="max-h-60 overflow-y-auto pr-1 space-y-2">
+                  {selectedInstallment.installments.map((inst, idx) => {
+                    const isPaid = inst.status === 'paid';
+                    return (
+                      <div key={inst.id || idx} className={`flex items-center justify-between p-3 rounded-xl border ${isPaid ? 'bg-slate-50 dark:bg-slate-800/30 border-slate-100 dark:border-slate-700/50 opacity-70' : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700'}`}>
+                        <div className="flex items-center gap-3">
+                          <div className={`w-6 h-6 rounded-full flex flex-col items-center justify-center text-xs font-bold ${isPaid ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/40 dark:text-emerald-400' : 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300'}`}>
+                            {inst.installment_no}
+                          </div>
+                          <div className="text-sm font-medium text-slate-600 dark:text-slate-300 font-mono">
+                            {inst.due_date || "—"}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <div className={`font-mono font-bold text-sm ${isPaid ? 'text-slate-500' : 'text-slate-800 dark:text-slate-200'}`}>
+                            ฿{fmt(inst.amount)}
+                          </div>
+                          {isPaid ? (
+                            <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800/50 px-2 py-1 flex items-center justify-center rounded-full whitespace-nowrap min-w-[65px]">ชำระแล้ว</span>
+                          ) : (
+                            <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-700/50 border border-slate-200 dark:border-slate-600 px-2 py-1 flex items-center justify-center rounded-full whitespace-nowrap min-w-[65px]">รอชำระ</span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            {/* Footer with Delete Action */}
+            <div className="p-4 border-t border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 flex justify-end">
+              <button 
+                onClick={() => {
+                  setSelectedInstallment(null); // Close modal first
+                  handleDelete('inst', selectedInstallment.id);
+                }}
+                className="flex items-center gap-2 px-4 py-2 bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-900/40 rounded-xl text-sm font-bold transition-colors shadow-sm"
+              >
+                <Trash2 size={16} /> ลบรายการ
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

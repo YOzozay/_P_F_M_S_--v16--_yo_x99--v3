@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Car, Home, Plus, Trash2, Landmark, List } from 'lucide-react';
+import { Car, Home, Plus, Trash2, Landmark, List, RefreshCw } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { apiGet, apiPost } from "../api/gsApi";
 import { fmt } from "../utils/formatters";
 import { FInput } from "../components/form/FInput";
+import { CustomDatePicker } from "../components/form/CustomDatePicker";
 
 export default function LoansPage() {
   const [activeTab, setActiveTab] = useState('car');
@@ -11,6 +12,7 @@ export default function LoansPage() {
   const [loans, setLoans] = useState([]);
   const [loadErr, setLoadErr] = useState(null);
   const [simulators, setSimulators] = useState({});
+  const [lastSynced, setLastSynced] = useState(null);
 
   // Forms
   const [carForm, setCarForm] = useState({ name: '', company: '', totalAmount: '', monthlyInstallment: '', startDate: '', totalMonths: '' });
@@ -42,18 +44,29 @@ export default function LoansPage() {
   };
 
   const loadData = useCallback(async () => {
-    setLoading(true);
     setLoadErr(null);
+    const cacheKey = `loans_${activeTab}`;
+    // ① Pre-load from cache for instant UI
+    try {
+      const cached = localStorage.getItem(cacheKey);
+      if (cached) { setLoans(JSON.parse(cached)); setLoading(false); }
+      else setLoading(true);
+    } catch { setLoading(true); }
+
+    // ② Fetch fresh data from API
     try {
       const action = activeTab === 'car' ? "getCarLoans" : "getHomeLoans";
       const data = await apiGet({ action });
       if (data?.error) throw new Error(data.error);
       const mapped = Array.isArray(data) ? data.map(i => ({...i, type: activeTab})) : [];
       setLoans(mapped);
+      try { localStorage.setItem(cacheKey, JSON.stringify(mapped)); } catch {}
+      const t = new Date();
+      setLastSynced(`${t.getHours().toString().padStart(2,'0')}:${t.getMinutes().toString().padStart(2,'0')}`);
     } catch (e) {
       console.error(e);
       setLoadErr(e.message || 'โหลดข้อมูลไม่สำเร็จ กรุณารีเฟรชหน้า');
-      setLoans([]);
+      if (!loans.length) setLoans([]);
     } finally {
       setLoading(false);
     }
@@ -315,9 +328,17 @@ export default function LoansPage() {
     <div className="space-y-6 pb-10">
       
       {/* Header Area */}
-      <div>
-        <h1 className="text-2xl font-bold text-slate-800 dark:text-white">Loans & Installments</h1>
-        <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">จัดการสินเชื่อรถยนต์และสินเชื่อบ้าน (Flat Rate & Effective Rate)</p>
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-800 dark:text-white">Loans &amp; Installments</h1>
+          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">จัดการสินเชื่อรถยนต์และสินเชื่อบ้าน (Flat Rate &amp; Effective Rate)</p>
+        </div>
+        {lastSynced && (
+          <div className="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400 font-medium bg-emerald-50 dark:bg-emerald-900/20 px-3 py-1.5 rounded-lg border border-emerald-200 dark:border-emerald-800">
+            <RefreshCw size={12} className="shrink-0" />
+            Synced {lastSynced}
+          </div>
+        )}
       </div>
 
       {/* Tabs Container */}
@@ -355,8 +376,7 @@ export default function LoansPage() {
                     <input required type="number" value={carForm.monthlyInstallment} onChange={e => setCarForm({...carForm, monthlyInstallment: e.target.value})} className={InputClass} placeholder="0" />
                   </div>
                   <div className="md:col-span-2">
-                    <label className={LabelClass}>วันที่เริ่มชำระงวดแรก</label>
-                    <input required type="date" value={carForm.startDate} onChange={e => setCarForm({...carForm, startDate: e.target.value})} className={InputClass} />
+                    <CustomDatePicker required label="วันที่เริ่มชำระงวดแรก" value={carForm.startDate} onChange={v => setCarForm({...carForm, startDate: v})} />
                   </div>
                   <div className="md:col-span-1">
                     <label className={LabelClass}>จำนวนงวดทั้งหมด</label>
@@ -402,8 +422,7 @@ export default function LoansPage() {
                     <input required type="number" value={homeForm.monthlyInstallment} onChange={e => setHomeForm({...homeForm, monthlyInstallment: e.target.value})} className={InputClass} placeholder="0" />
                   </div>
                   <div className="md:col-span-2">
-                    <label className={LabelClass}>วันที่เริ่มชำระงวดแรก</label>
-                    <input required type="date" value={homeForm.startDate} onChange={e => setHomeForm({...homeForm, startDate: e.target.value})} className={InputClass} />
+                    <CustomDatePicker required label="วันที่เริ่มชำระงวดแรก" value={homeForm.startDate} onChange={v => setHomeForm({...homeForm, startDate: v})} />
                   </div>
                   <div className="md:col-span-1">
                     <label className={LabelClass}>ระยะเวลา (งวด)</label>

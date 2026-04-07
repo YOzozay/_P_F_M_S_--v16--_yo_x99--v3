@@ -6,7 +6,7 @@ import { calculatePayroll } from "../utils/payrollUtils";
 import Swal from 'sweetalert2';
 
 // ✅ นำเข้า Icon ที่จำเป็นสำหรับ Modal เข้ามาเพิ่มครับ
-import { Settings, Save, Plus, History, X, Calendar, Zap, Clock } from 'lucide-react';
+import { Settings, Save, Plus, History, X, Calendar, Zap, Clock, Hash } from 'lucide-react';
 
 import { Card } from "../components/ui/Card";
 import { Section } from "../components/ui/Section";
@@ -14,6 +14,7 @@ import { Btn, XBtn } from "../components/ui/Btn";
 import { Badge } from "../components/ui/Badge";
 import { FormField } from "../components/form/FormField";
 import { FInput } from "../components/form/FInput";
+import { CustomDatePicker } from "../components/form/CustomDatePicker";
 import { CustomSelect } from "../components/form/CustomSelect";
 import { MonthPicker } from "../components/form/MonthPicker";
 import { Loading } from "../components/shared/Loading";
@@ -46,6 +47,7 @@ export default function OTTrackerPage() {
   const [payMonth, setPayMonth] = useState(getPayMonth() || "2024-01");
   const [otLogs, setOtLogs] = useState([]);
   const [config, setConfig] = useState(null);
+  const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState(null);
@@ -96,8 +98,9 @@ export default function OTTrackerPage() {
     Promise.all([
       apiGet({ action: "getWorklogs", payMonth }),
       apiGet({ action: "getConfig" }),
-      apiGet({ action: "getSalaryHistory" }) // โหลดประวัติเงินเดือนมารอไว้เลย
-    ]).then(([logs, conf, hist]) => {
+      apiGet({ action: "getSalaryHistory" }), // โหลดประวัติเงินเดือนมารอไว้เลย
+      apiGet({ action: "summary", payMonth })
+    ]).then(([logs, conf, hist, sum]) => {
       setOtLogs(Array.isArray(logs) ? logs : []);
       setSalaryHistory(Array.isArray(hist) ? hist : []);
       setConfig(conf || {
@@ -106,6 +109,7 @@ export default function OTTrackerPage() {
         fuel_per_day: 100, social_security_max_base: 15000, social_security_rate: 0.05,
         student_loan_fixed: 1500
       });
+      setSummary(sum && !sum.error ? sum : null);
     }).catch(e => setErr("โหลดข้อมูลไม่สำเร็จ")).finally(() => setLoading(false));
   }, [payMonth]);
 
@@ -204,11 +208,37 @@ export default function OTTrackerPage() {
     }
   };
 
-  const payroll = config ? calculatePayroll(config, otLogs, 22) : null;
+  const baseSalary = summary?.income?.monthlySalary && summary.income.monthlySalary > 0 
+                     ? summary.income.monthlySalary 
+                     : (config?.salary || 0);
+
+  const backendOtPay = summary?.income?.otPay || 0;
+
+  const rawPayroll = config ? calculatePayroll({ ...config, salary: baseSalary }, otLogs, 22) : null;
+  const payroll = rawPayroll ? {
+    ...rawPayroll,
+    otPay: backendOtPay > 0 ? backendOtPay : rawPayroll.otPay,
+    grossIncome: baseSalary + (backendOtPay > 0 ? backendOtPay : rawPayroll.otPay) + rawPayroll.totalAllowances,
+    netIncome: (baseSalary + (backendOtPay > 0 ? backendOtPay : rawPayroll.otPay) + rawPayroll.totalAllowances) - rawPayroll.totalDeductions
+  } : null;
+
   const currentMonthStr = payMonth ? payMonth.split("-")[1] : "01";
+
+  const totalHolidayHours = otLogs.reduce((acc, log) => acc + (Number(log.holiday_hours) || 0), 0);
+  const totalOt15 = otLogs.reduce((acc, log) => acc + (Number(log.ot15 || log.ot_evening_1_5x) || 0), 0);
+  const totalOt3 = otLogs.reduce((acc, log) => acc + (Number(log.ot3 || log.ot_evening_3x) || 0), 0);
+  const grandTotalOt = totalHolidayHours + totalOt15 + totalOt3;
 
   const InputClass = "w-full p-2.5 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none text-slate-800 dark:text-slate-200 transition-colors text-sm";
   const LabelClass = "block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1.5 uppercase tracking-wider";
+
+  if (loading && !config && !summary) {
+    return (
+      <div className="flex h-64 items-center justify-center">
+        <div className="animate-pulse text-slate-500 font-semibold">กำลังโหลดข้อมูล...</div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 pb-10 relative">
@@ -245,7 +275,7 @@ export default function OTTrackerPage() {
           <div className="bg-white dark:bg-slate-800 p-6 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
             <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-5">บันทึกการทำล่วงเวลา (OT)</h3>
             <div className="space-y-5">
-              <FInput label="วันที่ทำ OT" icon={Calendar} type="date" value={form.date} onChange={v => f("date", v)} required />
+              <CustomDatePicker label="วันที่ทำ OT" value={form.date} onChange={v => f("date", v)} required />
 
               <FormField label="อัตราค่าล่วงเวลา (Multiplier)" icon={Zap} required>
                 <CustomSelect
@@ -291,10 +321,30 @@ export default function OTTrackerPage() {
           {payroll && (
             <div className="bg-emerald-50 dark:bg-emerald-900/10 p-6 rounded-xl border border-emerald-200 dark:border-emerald-800/30 shadow-sm">
               <div className="text-emerald-600 dark:text-emerald-400 font-bold mb-4 pb-3 border-b border-emerald-200 dark:border-emerald-800/30">💰 ประมาณการรายได้สุทธิ (Estimate)</div>
+              
+              <div className="bg-white dark:bg-slate-800 rounded-xl p-4 border border-emerald-100 dark:border-emerald-800/50 mb-4 space-y-2.5 shadow-sm text-sm">
+                <div className="flex justify-between text-slate-600 dark:text-slate-300">
+                  <span className="flex items-center gap-1.5"><Clock size={14} className="text-emerald-500" /> รวมชั่วโมง x1.0 (วันหยุด):</span>
+                  <span className="font-semibold text-emerald-600 dark:text-emerald-400">{totalHolidayHours} ชม.</span>
+                </div>
+                <div className="flex justify-between text-slate-600 dark:text-slate-300">
+                  <span className="flex items-center gap-1.5"><Clock size={14} className="text-amber-500" /> รวมชั่วโมง x1.5 (OT ปกติ):</span>
+                  <span className="font-semibold text-amber-600 dark:text-amber-500">{totalOt15} ชม.</span>
+                </div>
+                <div className="flex justify-between text-slate-600 dark:text-slate-300">
+                  <span className="flex items-center gap-1.5"><Clock size={14} className="text-rose-500" /> รวมชั่วโมง x3.0 (OT วันหยุด):</span>
+                  <span className="font-semibold text-rose-600 dark:text-rose-500">{totalOt3} ชม.</span>
+                </div>
+                <div className="flex justify-between text-slate-700 dark:text-slate-200 border-t border-slate-100 dark:border-slate-700/50 pt-2.5 mt-2 font-bold">
+                  <span className="flex items-center gap-1.5"><Hash size={14} className="text-blue-500" /> รวมชั่วโมง OT ทั้งหมด:</span>
+                  <span className="text-blue-600 dark:text-blue-400">{grandTotalOt} ชม.</span>
+                </div>
+              </div>
+
               <div className="space-y-2.5 text-sm">
                 {/* ── Income lines ── */}
                 <div className="flex justify-between text-slate-600 dark:text-slate-300">
-                  <span>เงินเดือนฐาน:</span> <span className="font-semibold">฿{fmt(config.salary)}</span>
+                  <span>เงินเดือนฐาน:</span> <span className="font-semibold">฿{fmt(baseSalary)}</span>
                 </div>
                 <div className="flex justify-between text-slate-600 dark:text-slate-300">
                   <span>ค่า OT สะสม:</span> <span className="font-bold text-blue-600 dark:text-blue-400">+฿{fmt(payroll.otPay)}</span>
@@ -311,7 +361,7 @@ export default function OTTrackerPage() {
 
                 {/* ── Deductions ── */}
                 <div className="flex justify-between text-slate-600 dark:text-slate-300 pt-1">
-                  <span>หัก ประกันสังคม <span className="text-slate-400 dark:text-slate-500 text-xs">(จากเงินเดือนฐาน, สูงสุด ฿750)</span>:</span>
+                  <span>เงินสมทบประกันสังคม <span className="text-slate-400 dark:text-slate-500 text-xs">(จากเงินเดือนฐาน, สูงสุด ฿750)</span>:</span>
                   <span className="font-bold text-rose-500">-฿{fmt(payroll.socialSecurity)}</span>
                 </div>
                 {payroll.studentLoan > 0 && (
@@ -323,7 +373,7 @@ export default function OTTrackerPage() {
 
                 {/* ── Net total ── */}
                 <div className="flex justify-between items-center text-lg font-bold mt-3 bg-white dark:bg-slate-800 p-3 rounded-xl border border-emerald-100 dark:border-emerald-800/50">
-                  <span className="text-slate-700 dark:text-slate-200">รับสุทธิ (Net):</span>
+                  <span className="text-slate-700 dark:text-slate-200">รายได้สุทธิ (Net):</span>
                   <span className="text-emerald-600 dark:text-emerald-400">฿{fmt(payroll.netIncome)}</span>
                 </div>
               </div>
@@ -433,7 +483,7 @@ export default function OTTrackerPage() {
                   <form onSubmit={handleAddSalary} className="space-y-4 bg-slate-50 dark:bg-slate-900/30 p-5 rounded-xl border border-slate-100 dark:border-slate-700/50">
                     <div>
                       <label className={LabelClass}>วันที่เริ่มใช้ (Effective Date) <span className="text-rose-500">*</span></label>
-                      <input type="date" value={salaryForm.effective_date} onChange={e => setSalaryForm(p => ({ ...p, effective_date: e.target.value }))} className={InputClass} required />
+                      <CustomDatePicker value={salaryForm.effective_date} onChange={v => setSalaryForm(p => ({ ...p, effective_date: v }))} required />
                     </div>
                     <div>
                       <label className={LabelClass}>ฐานเงินเดือน (฿) <span className="text-rose-500">*</span></label>
