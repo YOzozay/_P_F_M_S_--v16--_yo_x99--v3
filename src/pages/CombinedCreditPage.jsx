@@ -20,6 +20,7 @@ export default function CombinedCreditPage() {
   const [fullPayments, setFullPayments] = useState([]);
   const [selectedInstallment, setSelectedInstallment] = useState(null);
   const [editingCard, setEditingCard] = useState(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // --- State สำหรับ Form ---
   const [cardForm, setCardForm] = useState({ name: '', credit_limit: '', closing_day: '', due_day: '' });
@@ -106,37 +107,47 @@ export default function CombinedCreditPage() {
   // --- Handlers สำหรับ Form ---
   const handleAddCard = async (e) => {
     e.preventDefault();
-    if (!cardForm.name || !cardForm.credit_limit) return;
+    if (isSubmitting || !cardForm.name || !cardForm.credit_limit) return;
+    setIsSubmitting(true);
     try {
       await apiPost({ action: "createCreditCard", ...cardForm });
       showSuccessAlert('เพิ่มบัตรเครดิตเรียบร้อยแล้ว');
       loadAllData();
       setCardForm({ name: '', credit_limit: '', closing_day: '', due_day: '' });
     } catch (e) { showErrorAlert(e.message || "สร้างบัตรไม่สำเร็จ"); }
+    finally { setIsSubmitting(false); }
   };
 
   const handleEditCard = async (e) => {
     e.preventDefault();
+    if (isSubmitting) return;
+    setIsSubmitting(true);
     try {
       await apiPost({ action: "editCreditCard", ...editingCard });
       showSuccessAlert('อัปเดตข้อมูลบัตรเรียบร้อยแล้ว');
       loadAllData();
       setEditingCard(null);
     } catch (e) { showErrorAlert(e.message || "แก้ไขบัตรไม่สำเร็จ"); }
+    finally { setIsSubmitting(false); }
   };
 
   const handleAddBill = async (e) => {
     e.preventDefault();
+    if (isSubmitting) return;
+    setIsSubmitting(true);
     try {
       await apiPost({ action: "addFixedExpense", name: billForm.name, amount: billForm.amount, start_date: billForm.startDate });
       showSuccessAlert('เพิ่มค่าใช้จ่ายคงที่เรียบร้อยแล้ว');
       loadAllData();
       setBillForm({ name: '', amount: '', startDate: '' });
     } catch (e) { showErrorAlert(e.message || "สร้างค่าใช้จ่ายคงที่ไม่สำเร็จ"); }
+    finally { setIsSubmitting(false); }
   };
 
   const handleAddInstallment = async (e) => {
     e.preventDefault();
+    if (isSubmitting) return;
+    setIsSubmitting(true);
     try {
       await apiPost({ 
         action: "createCreditTransaction", 
@@ -151,10 +162,13 @@ export default function CombinedCreditPage() {
       loadAllData();
       setInstallmentForm({ date: '', cardId: '', itemName: '', totalAmount: '', months: '', paid_installments: '' });
     } catch (e) { showErrorAlert(e.message || "บันทึกไม่สำเร็จ"); }
+    finally { setIsSubmitting(false); }
   };
 
   const handleAddFullPayment = async (e) => {
     e.preventDefault();
+    if (isSubmitting) return;
+    setIsSubmitting(true);
     try {
       await apiPost({ 
         action: "createCreditTransaction", 
@@ -168,7 +182,10 @@ export default function CombinedCreditPage() {
       loadAllData();
       setFullPaymentForm({ date: '', cardId: '', itemName: '', amount: '' });
     } catch (e) { showErrorAlert(e.message || "บันทึกไม่สำเร็จ"); }
+    finally { setIsSubmitting(false); }
   };
+
+
 
   const handleDelete = async (type, id) => {
     const isDark = document.documentElement.classList.contains('dark');

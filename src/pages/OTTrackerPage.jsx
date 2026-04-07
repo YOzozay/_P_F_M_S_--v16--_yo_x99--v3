@@ -117,6 +117,7 @@ export default function OTTrackerPage() {
 
   // --- Handlers หน้าหลัก ---
   const handleAddOT = async (overrideMultiplier, overrideHours) => {
+    if (submitting) return;
     const submitHours = overrideHours || form.hours;
     const submitMultiplier = overrideMultiplier || form.multiplier;
 
@@ -179,6 +180,7 @@ export default function OTTrackerPage() {
   };
 
   const handleSaveConfig = async () => {
+    if (savingSettings) return;
     setSavingSettings(true);
     try {
       await apiPost({ action: "updateConfig", ...draftConfig });
@@ -194,7 +196,7 @@ export default function OTTrackerPage() {
 
   const handleAddSalary = async (e) => {
     e.preventDefault();
-    if (!salaryForm.effective_date || !salaryForm.salary) return;
+    if (savingSettings || !salaryForm.effective_date || !salaryForm.salary) return;
     setSavingSettings(true);
     try {
       await apiPost({ action: "addSalaryHistory", ...salaryForm });

@@ -13,6 +13,7 @@ export default function LoansPage() {
   const [loadErr, setLoadErr] = useState(null);
   const [simulators, setSimulators] = useState({});
   const [lastSynced, setLastSynced] = useState(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Forms
   const [carForm, setCarForm] = useState({ name: '', company: '', totalAmount: '', monthlyInstallment: '', startDate: '', totalMonths: '', paidInstallments: '' });
@@ -76,6 +77,8 @@ export default function LoansPage() {
 
   const handleAddCarLoan = async (e) => {
     e.preventDefault();
+    if (isSubmitting) return;
+    setIsSubmitting(true);
     try {
       await apiPost({ 
         action: "addLoan", 
@@ -93,10 +96,13 @@ export default function LoansPage() {
       loadData();
       setCarForm({ name: '', company: '', totalAmount: '', monthlyInstallment: '', startDate: '', totalMonths: '', paidInstallments: '' });
     } catch (e) { showErrorAlert(e.message || "บันทึกไม่สำเร็จ"); }
+    finally { setIsSubmitting(false); }
   };
 
   const handleAddHomeLoan = async (e) => {
     e.preventDefault();
+    if (isSubmitting) return;
+    setIsSubmitting(true);
     try {
       await apiPost({ 
         action: "addLoan", 
@@ -114,6 +120,7 @@ export default function LoansPage() {
       loadData();
       setHomeForm({ name: '', bank: '', totalAmount: '', monthlyInstallment: '', startDate: '', totalMonths: '', paidInstallments: '' });
     } catch (e) { showErrorAlert(e.message || "บันทึกไม่สำเร็จ"); }
+    finally { setIsSubmitting(false); }
   };
 
   const handleDelete = async (id) => {

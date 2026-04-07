@@ -248,16 +248,51 @@ function deleteWorklog(data) {
 ========================= */
 function getMonthlySummary(monthStr) {
   if (!monthStr) return { error: "payMonth required (YYYY-MM)" };
-  const cfg = getConfig();
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  
+  const rawData = {
+    cfg: getConfig(),
+    salRows: ss.getSheetByName("salary_history").getDataRange().getValues().slice(1),
+    workLogs: ss.getSheetByName("work_logs").getDataRange().getValues().slice(1),
+    expenses: ss.getSheetByName("expenses").getDataRange().getValues().slice(1),
+    fixedEx: ss.getSheetByName("fixed_expenses").getDataRange().getValues().slice(1),
+    loans: ss.getSheetByName("loans") ? ss.getSheetByName("loans").getDataRange().getValues().slice(1) : [],
+    instRows: ss.getSheetByName("credit_installments").getDataRange().getValues().slice(1)
+  };
+  
   const [year, month] = monthStr.split("-").map(Number);
+  return getSummaryForMonthCore(year, month, rawData);
+}
+
+function getYearSummary(yearStr) {
+  const year = Number(yearStr);
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  
+  const rawData = {
+    cfg: getConfig(),
+    salRows: ss.getSheetByName("salary_history").getDataRange().getValues().slice(1),
+    workLogs: ss.getSheetByName("work_logs").getDataRange().getValues().slice(1),
+    expenses: ss.getSheetByName("expenses").getDataRange().getValues().slice(1),
+    fixedEx: ss.getSheetByName("fixed_expenses").getDataRange().getValues().slice(1),
+    loans: ss.getSheetByName("loans") ? ss.getSheetByName("loans").getDataRange().getValues().slice(1) : [],
+    instRows: ss.getSheetByName("credit_installments").getDataRange().getValues().slice(1)
+  };
+
+  const results = [];
+  for (let m = 1; m <= 12; m++) {
+    const s = getSummaryForMonthCore(year, m, rawData);
+    results.push({ payMonth: s.payMonth, netIncome: s.netIncome || 0, totalExpenses: s.expenses?.totalExpenses || 0, netBalance: s.netBalance || 0 });
+  }
+  return results;
+}
+
+function getSummaryForMonthCore(year, month, rawData) {
+  const { cfg, salRows, workLogs, expenses, fixedEx, loans, instRows } = rawData;
   const { startDate, endDate } = getPayPeriod(year, month);
 
   // --- 1. คำนวณรายได้ และ OT ---
-  const rows = SpreadsheetApp.openById(SHEET_ID).getSheetByName("work_logs").getDataRange().getValues();
-  rows.shift();
-  
   let workDays = 0, otMealDays = 0, holidayHours = 0, ot15 = 0, ot3 = 0;
-  rows.forEach(r => {
+  workLogs.forEach(r => {
     const d = new Date(r[1]);
     if (d >= startDate && d <= endDate) {
       workDays++;
@@ -271,7 +306,10 @@ function getMonthlySummary(monthStr) {
     }
   });
 
-  const monthlySalary = getSalaryForMonth(endDate);
+  let monthlySalary = 0;
+  let sortedSal = [...salRows].sort((a,b) => new Date(a[0]) - new Date(b[0]));
+  sortedSal.forEach(r => { if (new Date(r[0]) <= endDate) monthlySalary = Number(r[1]); });
+
   const hourlyRate    = (monthlySalary / cfg.salary_divisor_days) / cfg.work_hours_per_day;
   const otPay         = round2((holidayHours * hourlyRate * cfg.ot_multiplier_1) + (ot15 * hourlyRate * cfg.ot_multiplier_1_5) + (ot3 * hourlyRate * cfg.ot_multiplier_3));
   const mealNormal    = workDays * cfg.meal_normal_per_day;
@@ -288,27 +326,58 @@ function getMonthlySummary(monthStr) {
   const totalDeduction = socialSecurity + studentLoan;
   const netIncome      = round2(grossIncome - totalDeduction);
 
-  // --- 2. คำนวณรายจ่ายและหนี้สิน ---
-  const varExp   = getExpensesForPeriod(startDate, endDate);
-  const fixedExp = getFixedExpensesForPeriod(startDate, endDate);
+  // --- 2. คำนวณรายจ่าย ---
+  let varTotal = 0;
+  const byCategory = {};
+  expenses.forEach(r => {
+    const d = new Date(r[1]);
+    if (d >= startDate && d <= endDate) {
+      const amt = Number(r[3]) || 0;
+      varTotal += amt;
+      byCategory[r[2]] = (byCategory[r[2]] || 0) + amt;
+    }
+  });
   
-  const carLoans = getLoans("car_loan");
-  const homeLoans = getLoans("home_loan");
-  const totalLoanMonthly = [...carLoans, ...homeLoans]
-    .filter(l => l.status === "active")
-    .reduce((sum, l) => sum + (Number(l.monthly_due) || 0), 0);
+  let fixTotal = 0;
+  const fixItems = [];
+  fixedEx.forEach(r => {
+    const active = String(r[5]).toLowerCase() === "true";
+    const start = r[3] ? new Date(r[3]) : null;
+    const end   = r[4] ? new Date(r[4]) : null;
+    if (!active || !start) return;
+    if (start <= endDate && (!end || end >= startDate)) {
+      const amt = Number(r[2]) || 0;
+      fixTotal += amt;
+      fixItems.push({ name: r[1], amount: amt });
+    }
+  });
 
-  const installments = getInstallments();
-  const totalCreditMonthly = installments
-    .filter(i => i.status === "active" || i.status === "unpaid")
-    .reduce((sum, i) => sum + (Number(i.amount) || 0), 0);
+  const totalExpenses = round2(varTotal + fixTotal);
 
-  const totalMonthlyDebt = round2(totalLoanMonthly + totalCreditMonthly + fixedExp.total);
+  // --- 3. หนี้สิน (เก็บเฉพาะยอดสำหรับเดือนนั้นๆ) ---
+  let totalLoanMonthly = 0;
+  loans.forEach(r => {
+    // r[2] is type, r[6] is monthly_due, r[14] is status
+    if (r[14] === "active" && (r[2] === "car_loan" || r[2] === "home_loan")) {
+      totalLoanMonthly += (Number(r[6]) || 0);
+    }
+  });
+
+  let totalCreditMonthly = 0;
+  instRows.forEach(r => {
+     // r[5] is due_date, r[4] is amount
+     const d = new Date(r[5]);
+     if (d >= startDate && d <= endDate) {
+       totalCreditMonthly += (Number(r[4]) || 0);
+     }
+  });
+
+  const totalMonthlyDebt = round2(totalLoanMonthly + totalCreditMonthly + fixTotal);
   const dtiPercent = grossIncome > 0 ? round2((totalMonthlyDebt / grossIncome) * 100) : 0;
 
-  // --- 3. ส่งผลลัพธ์ ---
+  // --- 4. ส่งผลลัพธ์ ---
   return {
-    payMonth: monthStr,
+    payMonth: `${year}-${String(month).padStart(2, "0")}`,
     period: { startDate: fmt_date(startDate), endDate: fmt_date(endDate) },
     income: { 
       monthlySalary, holidayHours, ot15, ot3, 
@@ -321,24 +390,17 @@ function getMonthlySummary(monthStr) {
     debtBreakdown: { 
       loans: round2(totalLoanMonthly), 
       credits: round2(totalCreditMonthly), 
-      fixed: round2(fixedExp.total), 
+      fixed: round2(fixTotal), 
       totalDebt: totalMonthlyDebt, 
       dti: dtiPercent 
     },
-    expenses: { variable: varExp, fixed: fixedExp, totalExpenses: round2(varExp.total + fixedExp.total) },
-    netBalance: round2(netIncome - totalMonthlyDebt - varExp.total)
+    expenses: { 
+      variable: { total: round2(varTotal), byCategory }, 
+      fixed: { total: round2(fixTotal), items: fixItems }, 
+      totalExpenses 
+    },
+    netBalance: round2(netIncome - totalExpenses)
   };
-}
-
-function getYearSummary(yearStr) {
-  const year = Number(yearStr);
-  const results = [];
-  for (let m = 1; m <= 12; m++) {
-    const monthStr = `${year}-${String(m).padStart(2, "0")}`;
-    const s = getMonthlySummary(monthStr);
-    results.push({ payMonth: monthStr, netIncome: s.netIncome || 0, totalExpenses: s.expenses?.totalExpenses || 0, netBalance: s.netBalance || 0 });
-  }
-  return results;
 }
 
 /* =========================
