@@ -1,16 +1,41 @@
-Task: Create the Loans Page (Phase 3)
-Please create the `src/pages/LoansPage.jsx` file.
+📑 FinanceOS: Project Master Context (สถานะปัจจุบัน)
+Project Overview:
+แอปพลิเคชันจัดการการเงินส่วนบุคคลแบบ Full-stack โดยใช้ React (Vite) เป็น Frontend และ Google Apps Script (GAS) เป็น Backend โดยใช้ Google Sheets เป็นฐานข้อมูล
 
-Requirements:
-1. UI/UX: Use the same Tailwind layout style as `CombinedCreditPage.jsx` (Use Tabs or distinct sections for Car Loans and Home Loans).
-2. Car Loans Section (Flat Rate):
-   - Input fields: Car Name/Model, Finance Company, Total Loan Amount, Monthly Installment (Flat Rate), Start Date, Total Months.
-3. Home Loans Section (Effective Rate):
-   - Input fields: Home/Property Name, Bank, Total Loan Amount, Monthly Installment, Start Date, Total Months.
-4. Functionality: 
-   - Add ability to save new loans using `apiPost` (action: "addLoan").
-   - Display a list of active loans fetched via `apiGet` (action: "getLoans").
-   - Include a progress bar for each loan showing how much has been paid vs remaining.
-   - Use `sweetalert2` for success/error alerts.
+Tech Stack:
 
-Please generate the complete, self-contained code for `LoansPage.jsx`.  
+Frontend: React, Tailwind CSS, Lucide Icons, SweetAlert2, Framer Motion.
+
+Backend: Google Apps Script (ไฟล์ GS.txt), Web App Deployment.
+
+Database: Google Sheets (Sheets: expenses, work_logs, credit_installments, loans, system_config, etc.)
+
+Key Features & Logic (Updated):
+
+OT & Income Calculation: คำนวณจาก work_logs โดยใช้ฐานเงินเดือนล่าสุดจาก salary_history และตัวคูณจาก system_config.
+
+Financial Health (DTI): คำนวณภาระหนี้รวมต่อเดือน (debtBreakdown) ประกอบด้วย สินเชื่อรถ/บ้าน, ผ่อนบัตรเครดิต และบิลประจำ เทียบกับรายได้รวม (grossIncome).
+
+Backdated History Support: * ฟังก์ชัน addLoan และ createCreditTransaction รองรับฟิลด์ paid_installments.
+
+เมื่อระบุจำนวนงวดที่จ่ายแล้ว ระบบจะสร้างแถวสถานะ paid ในชีตประวัติ และลงบันทึกในชีต expenses ย้อนหลังให้อัตโนมัติเพื่อให้ยอดคงเหลือแม่นยำ.
+
+Responsive Dashboard: การ์ด DTI รองรับการแสดงผลแบบ Mobile-first (Stack layout) เมื่อหน้าจอแคบลงเพื่อไม่ให้ UI ทับซ้อนกัน.
+
+Data Structure Reference (Backend):
+
+grossIncome = Salary + OT + Allowances.
+
+netIncome = Gross Income - (Social Security + Taxes/Student Loan).
+
+netBalance = Net Income - Total Monthly Debt - Variable Expenses.
+
+debtBreakdown = { loans, credits, fixed, totalDebt, dti }.
+
+UI Guidelines:
+
+Fonts: 'Prompt' (Thai), 'Inter' (Numbers/English).
+
+Theme: Dark Mode (Slate/Emerald), Glassmorphism effect.
+
+Components: การ์ดต้องมีเงา (Shadow) และขอบมน (Rounded-2xl), ปุ่มใช้ Hover effect เสมอ.
