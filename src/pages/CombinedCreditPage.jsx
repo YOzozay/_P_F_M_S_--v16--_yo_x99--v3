@@ -23,7 +23,7 @@ export default function CombinedCreditPage() {
   // --- State สำหรับ Form ---
   const [cardForm, setCardForm] = useState({ name: '', credit_limit: '', closing_day: '', due_day: '' });
   const [billForm, setBillForm] = useState({ name: '', amount: '', startDate: '' });
-  const [installmentForm, setInstallmentForm] = useState({ date: '', cardId: '', itemName: '', totalAmount: '', months: '' });
+  const [installmentForm, setInstallmentForm] = useState({ date: '', cardId: '', itemName: '', totalAmount: '', months: '', paid_installments: '' });
   const [fullPaymentForm, setFullPaymentForm] = useState({ date: '', cardId: '', itemName: '', amount: '' });
 
   // --- Helpers สำหรับ Alert ---
@@ -133,11 +133,12 @@ export default function CombinedCreditPage() {
         description: installmentForm.itemName, 
         amount: installmentForm.totalAmount, 
         transaction_date: installmentForm.date, 
-        installment_months: installmentForm.months 
+        installment_months: installmentForm.months,
+        paid_installments: Number(installmentForm.paid_installments) || 0
       });
       showSuccessAlert('บันทึกรายการผ่อนเรียบร้อยแล้ว');
       loadAllData();
-      setInstallmentForm({ date: '', cardId: '', itemName: '', totalAmount: '', months: '' });
+      setInstallmentForm({ date: '', cardId: '', itemName: '', totalAmount: '', months: '', paid_installments: '' });
     } catch (e) { showErrorAlert(e.message || "บันทึกไม่สำเร็จ"); }
   };
 
@@ -386,6 +387,9 @@ export default function CombinedCreditPage() {
                   </div>
                   <div className="md:col-span-2">
                     <FInput required label="จำนวนเดือนที่ผ่อน" type="number" min="2" value={installmentForm.months} onChange={v => setInstallmentForm({...installmentForm, months: v})} />
+                  </div>
+                  <div className="md:col-span-1">
+                    <FInput label="ชำระแล้ว (งวด)" type="number" min="0" value={installmentForm.paid_installments} onChange={v => setInstallmentForm({...installmentForm, paid_installments: v})} placeholder="เช่น 0" tooltip="ระบุจำนวนงวดที่ชำระไปแล้ว หากเป็นการบันทึกย้อนหลัง" />
                   </div>
                   <div className="md:col-span-1 flex items-end">
                     <button type="submit" className="w-full h-[42px] bg-emerald-500 hover:bg-emerald-600 text-white p-2.5 rounded-xl text-sm font-semibold transition">บันทึก</button>

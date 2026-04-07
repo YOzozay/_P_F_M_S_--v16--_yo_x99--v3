@@ -15,8 +15,8 @@ export default function LoansPage() {
   const [lastSynced, setLastSynced] = useState(null);
 
   // Forms
-  const [carForm, setCarForm] = useState({ name: '', company: '', totalAmount: '', monthlyInstallment: '', startDate: '', totalMonths: '' });
-  const [homeForm, setHomeForm] = useState({ name: '', bank: '', totalAmount: '', monthlyInstallment: '', startDate: '', totalMonths: '' });
+  const [carForm, setCarForm] = useState({ name: '', company: '', totalAmount: '', monthlyInstallment: '', startDate: '', totalMonths: '', paidInstallments: '' });
+  const [homeForm, setHomeForm] = useState({ name: '', bank: '', totalAmount: '', monthlyInstallment: '', startDate: '', totalMonths: '', paidInstallments: '' });
 
   // Alerts
   const showSuccessAlert = (title) => {
@@ -86,12 +86,12 @@ export default function LoansPage() {
         monthly_due: Number(carForm.monthlyInstallment),
         due_day: carForm.startDate ? new Date(carForm.startDate).getDate() : 1,
         total_installments: Number(carForm.totalMonths),
-        paid_installments: 0,
+        paid_installments: Number(carForm.paidInstallments) || 0,
         start_date: carForm.startDate
       });
       showSuccessAlert('เพิ่มข้อมูลสินเชื่อรถยนต์เรียบร้อยแล้ว');
       loadData();
-      setCarForm({ name: '', company: '', totalAmount: '', monthlyInstallment: '', startDate: '', totalMonths: '' });
+      setCarForm({ name: '', company: '', totalAmount: '', monthlyInstallment: '', startDate: '', totalMonths: '', paidInstallments: '' });
     } catch (e) { showErrorAlert(e.message || "บันทึกไม่สำเร็จ"); }
   };
 
@@ -107,12 +107,12 @@ export default function LoansPage() {
         monthly_due: Number(homeForm.monthlyInstallment),
         due_day: homeForm.startDate ? new Date(homeForm.startDate).getDate() : 1,
         total_installments: Number(homeForm.totalMonths),
-        paid_installments: 0,
+        paid_installments: Number(homeForm.paidInstallments) || 0,
         start_date: homeForm.startDate
       });
       showSuccessAlert('เพิ่มข้อมูลสินเชื่อบ้านเรียบร้อยแล้ว');
       loadData();
-      setHomeForm({ name: '', bank: '', totalAmount: '', monthlyInstallment: '', startDate: '', totalMonths: '' });
+      setHomeForm({ name: '', bank: '', totalAmount: '', monthlyInstallment: '', startDate: '', totalMonths: '', paidInstallments: '' });
     } catch (e) { showErrorAlert(e.message || "บันทึกไม่สำเร็จ"); }
   };
 
@@ -358,12 +358,12 @@ export default function LoansPage() {
             {/* CAR LOAN TAB */}
             {activeTab === 'car' && (
               <div className="space-y-8">
-                <form onSubmit={handleAddCarLoan} className="grid grid-cols-1 md:grid-cols-6 gap-4">
+                <form onSubmit={handleAddCarLoan} className="grid grid-cols-1 md:grid-cols-7 gap-4">
                   <div className="md:col-span-2">
                     <label className={LabelClass}>รุ่นรถ / ยี่ห้อ</label>
                     <input required type="text" value={carForm.name} onChange={e => setCarForm({...carForm, name: e.target.value})} className={InputClass} placeholder="เช่น Honda Civic RS" />
                   </div>
-                  <div className="md:col-span-2">
+                  <div className="md:col-span-3">
                     <label className={LabelClass}>สถาบันการเงิน</label>
                     <input required type="text" value={carForm.company} onChange={e => setCarForm({...carForm, company: e.target.value})} className={InputClass} placeholder="เช่น กรุงศรี ออโต้" />
                   </div>
@@ -376,15 +376,19 @@ export default function LoansPage() {
                     <input required type="number" value={carForm.monthlyInstallment} onChange={e => setCarForm({...carForm, monthlyInstallment: e.target.value})} className={InputClass} placeholder="0" />
                   </div>
                   <div className="md:col-span-2">
-                    <CustomDatePicker required label="วันที่เริ่มชำระงวดแรก" value={carForm.startDate} onChange={v => setCarForm({...carForm, startDate: v})} />
+                    <CustomDatePicker required label="วันที่เริ่มผ่อนงวดแรก" value={carForm.startDate} onChange={v => setCarForm({...carForm, startDate: v})} />
                   </div>
                   <div className="md:col-span-1">
-                    <label className={LabelClass}>จำนวนงวดทั้งหมด</label>
+                    <label className={LabelClass}>จำนวนงวด</label>
                     <input required type="number" value={carForm.totalMonths} onChange={e => setCarForm({...carForm, totalMonths: e.target.value})} className={InputClass} placeholder="เช่น 48, 60" />
                   </div>
-                  <div className="md:col-span-1 flex items-end">
-                     <button type="submit" className="w-full bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2.5 rounded-xl flex items-center justify-center gap-2 font-semibold transition-colors">
-                      <Plus size={18} />
+                  <div className="md:col-span-2">
+                    <label className={LabelClass}>ชำระแล้ว (กรณีลงย้อนหลัง)</label>
+                    <input type="number" min="0" value={carForm.paidInstallments} onChange={e => setCarForm({...carForm, paidInstallments: e.target.value})} className={InputClass} placeholder="ระบุ 0 หากเพิ่งเริ่มผ่อน" />
+                  </div>
+                  <div className="md:col-span-7 flex justify-end">
+                     <button type="submit" className="w-[120px] bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2.5 rounded-xl flex items-center justify-center gap-2 font-semibold transition-colors shadow-sm">
+                      <Plus size={18} /> บันทึก
                     </button>
                   </div>
                 </form>
@@ -404,12 +408,12 @@ export default function LoansPage() {
             {/* HOME LOAN TAB */}
             {activeTab === 'home' && (
               <div className="space-y-8">
-                <form onSubmit={handleAddHomeLoan} className="grid grid-cols-1 md:grid-cols-6 gap-4">
+                <form onSubmit={handleAddHomeLoan} className="grid grid-cols-1 md:grid-cols-7 gap-4">
                   <div className="md:col-span-2">
                     <label className={LabelClass}>ชื่อบ้าน / โครงการ</label>
                     <input required type="text" value={homeForm.name} onChange={e => setHomeForm({...homeForm, name: e.target.value})} className={InputClass} placeholder="เช่น ทาวน์โฮม 2 ชั้น" />
                   </div>
-                  <div className="md:col-span-2">
+                  <div className="md:col-span-3">
                     <label className={LabelClass}>ธนาคาร</label>
                     <input required type="text" value={homeForm.bank} onChange={e => setHomeForm({...homeForm, bank: e.target.value})} className={InputClass} placeholder="เช่น ธอส, SCB" />
                   </div>
@@ -422,15 +426,19 @@ export default function LoansPage() {
                     <input required type="number" value={homeForm.monthlyInstallment} onChange={e => setHomeForm({...homeForm, monthlyInstallment: e.target.value})} className={InputClass} placeholder="0" />
                   </div>
                   <div className="md:col-span-2">
-                    <CustomDatePicker required label="วันที่เริ่มชำระงวดแรก" value={homeForm.startDate} onChange={v => setHomeForm({...homeForm, startDate: v})} />
+                    <CustomDatePicker required label="วันที่เริ่มผ่อนงวดแรก" value={homeForm.startDate} onChange={v => setHomeForm({...homeForm, startDate: v})} />
                   </div>
                   <div className="md:col-span-1">
                     <label className={LabelClass}>ระยะเวลา (งวด)</label>
                     <input required type="number" value={homeForm.totalMonths} onChange={e => setHomeForm({...homeForm, totalMonths: e.target.value})} className={InputClass} placeholder="เช่น 360" />
                   </div>
-                  <div className="md:col-span-1 flex items-end">
-                     <button type="submit" className="w-full bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2.5 rounded-xl flex items-center justify-center gap-2 font-semibold transition-colors">
-                      <Plus size={18} />
+                  <div className="md:col-span-2">
+                    <label className={LabelClass}>ชำระแล้ว (กรณีลงย้อนหลัง)</label>
+                    <input type="number" min="0" value={homeForm.paidInstallments} onChange={e => setHomeForm({...homeForm, paidInstallments: e.target.value})} className={InputClass} placeholder="ระบุ 0 หากเพิ่งเริ่มผ่อน" />
+                  </div>
+                  <div className="md:col-span-7 flex justify-end">
+                     <button type="submit" className="w-[120px] bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2.5 rounded-xl flex items-center justify-center gap-2 font-semibold transition-colors shadow-sm">
+                      <Plus size={18} /> บันทึก
                     </button>
                   </div>
                 </form>
