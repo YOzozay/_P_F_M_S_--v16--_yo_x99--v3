@@ -43,6 +43,7 @@ function doPost(e) {
   if (data.action === "deleteWorklog")             return deleteWorklog(data);
   if (data.action === "createCreditTransaction")   return createCreditTransaction(data);
   if (data.action === "createCreditCard")          return createCreditCard(data);
+  if (data.action === "editCreditCard")            return editCreditCard(data);
   if (data.action === "payCreditInstallment")      return payCreditInstallment(data);
   if (data.action === "payDebt")                   return payDebt(data);
   if (data.action === "addFixedExpense")           return addFixedExpense(data);
@@ -251,9 +252,10 @@ function getMonthlySummary(monthStr) {
   const [year, month] = monthStr.split("-").map(Number);
   const { startDate, endDate } = getPayPeriod(year, month);
 
+  // --- 1. คำนวณรายได้ และ OT ---
   const rows = SpreadsheetApp.openById(SHEET_ID).getSheetByName("work_logs").getDataRange().getValues();
   rows.shift();
-
+  
   let workDays = 0, otMealDays = 0, holidayHours = 0, ot15 = 0, ot3 = 0;
   rows.forEach(r => {
     const d = new Date(r[1]);
@@ -275,50 +277,56 @@ function getMonthlySummary(monthStr) {
   const mealNormal    = workDays * cfg.meal_normal_per_day;
   const mealOt        = otMealDays * cfg.meal_ot_per_day;
   const fuel          = workDays * cfg.fuel_per_day;
+  const diligenceAllowance = cfg.diligence_allowance || 0;
   
-  // ✅ ดึงค่าเบี้ยขยันจาก config ถ้าไม่มีให้เป็น 0
-  const diligenceAllowance = cfg.diligence_allowance || 0; 
+  const grossIncome   = round2(monthlySalary + otPay + mealNormal + mealOt + fuel + diligenceAllowance);
+  const totalGross    = grossIncome;
   
-  // ✅ เอาเบี้ยขยันไปรวมในรายได้ทั้งหมด (Gross Income)
-  const totalGross   = round2(monthlySalary + otPay + mealNormal + mealOt + fuel + diligenceAllowance);
-  const grossIncome  = totalGross; // keep for backward compatibility
-  
-  const maxBase = cfg.social_security_max_base || 15000;
-  const ssRate = cfg.social_security_rate || 0.05;
-  const ssBase = Math.min(monthlySalary, maxBase);
-  // Calculate social security (5% of base salary), explicitly capped at 750
-  const social_security = Math.min(750, round2(ssBase * ssRate));
-  const socialSecurity = social_security;
+  const ssBase         = Math.min(monthlySalary, cfg.social_security_max_base || 15000);
+  const socialSecurity = Math.min(750, round2(ssBase * (cfg.social_security_rate || 0.05)));
   const studentLoan   = cfg.student_loan_fixed || 0;
   const totalDeduction = socialSecurity + studentLoan;
-  const netIncome     = round2(grossIncome - totalDeduction);
+  const netIncome      = round2(grossIncome - totalDeduction);
 
+  // --- 2. คำนวณรายจ่ายและหนี้สิน ---
   const varExp   = getExpensesForPeriod(startDate, endDate);
   const fixedExp = getFixedExpensesForPeriod(startDate, endDate);
-  const totalExpenses = varExp.total + fixedExp.total;
+  
+  const carLoans = getLoans("car_loan");
+  const homeLoans = getLoans("home_loan");
+  const totalLoanMonthly = [...carLoans, ...homeLoans]
+    .filter(l => l.status === "active")
+    .reduce((sum, l) => sum + (Number(l.monthly_due) || 0), 0);
 
+  const installments = getInstallments();
+  const totalCreditMonthly = installments
+    .filter(i => i.status === "active" || i.status === "unpaid")
+    .reduce((sum, i) => sum + (Number(i.amount) || 0), 0);
+
+  const totalMonthlyDebt = round2(totalLoanMonthly + totalCreditMonthly + fixedExp.total);
+  const dtiPercent = grossIncome > 0 ? round2((totalMonthlyDebt / grossIncome) * 100) : 0;
+
+  // --- 3. ส่งผลลัพธ์ ---
   return {
     payMonth: monthStr,
-    period: {
-      startDate: fmt_date(startDate),
-      endDate:   fmt_date(endDate)
-    },
-    income: {
-      monthlySalary, holidayHours, ot15, ot3,
+    period: { startDate: fmt_date(startDate), endDate: fmt_date(endDate) },
+    income: { 
+      monthlySalary, holidayHours, ot15, ot3, 
       otPay, mealNormal, mealOt, fuel, 
-      diligenceAllowance, // ✅ ส่งค่าเบี้ยขยันออกไปให้หน้าบ้านด้วย
-      totalGross,
-      grossIncome,
-      social_security
+      diligenceAllowance, grossIncome, totalGross,
+      social_security: socialSecurity
     },
-    deductions: {
-      socialSecurity,
-      studentLoan,
-      totalDeduction
-    },
+    deductions: { socialSecurity, studentLoan, totalDeduction },
     netIncome,
-    expenses: { variable: varExp, fixed: fixedExp, totalExpenses },
-    netBalance: round2(netIncome - totalExpenses)
+    debtBreakdown: { 
+      loans: round2(totalLoanMonthly), 
+      credits: round2(totalCreditMonthly), 
+      fixed: round2(fixedExp.total), 
+      totalDebt: totalMonthlyDebt, 
+      dti: dtiPercent 
+    },
+    expenses: { variable: varExp, fixed: fixedExp, totalExpenses: round2(varExp.total + fixedExp.total) },
+    netBalance: round2(netIncome - totalMonthlyDebt - varExp.total)
   };
 }
 
@@ -662,6 +670,21 @@ function createCreditCard(data) {
   return output({ status: "created", card_id: id });
 }
 
+function editCreditCard(data) {
+  const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName("credit_cards");
+  const rows = sheet.getDataRange().getValues();
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]).trim() === String(data.card_id).trim()) {
+      if (data.name) sheet.getRange(i + 1, 2).setValue(data.name);
+      if (data.credit_limit) sheet.getRange(i + 1, 3).setValue(Number(data.credit_limit));
+      if (data.closing_day) sheet.getRange(i + 1, 4).setValue(Number(data.closing_day));
+      if (data.due_day) sheet.getRange(i + 1, 5).setValue(Number(data.due_day));
+      return output({ status: "updated" });
+    }
+  }
+  return output({ error: "Card not found" });
+}
+
 function getCreditSummary() {
   const ss = SpreadsheetApp.openById(SHEET_ID);
   const cardRows = ss.getSheetByName("credit_cards").getDataRange().getValues();
@@ -737,53 +760,59 @@ function getCreditStatement(cardId, yearParam, monthParam) {
 function createCreditTransaction(data) {
   const ss = SpreadsheetApp.openById(SHEET_ID);
   const txId = Utilities.getUuid();
-  const now  = new Date();
+  const now = new Date();
   
-  // ✅ 1. ถ้าไม่ได้ระบุจำนวนเดือน (จ่ายเต็ม) ให้ถือเป็น 1 งวด เพื่อให้ระบบสร้างยอดค้างชำระ (Unpaid)
-  const inputMonths = Number(data.installment_months) || 0;
-  const months = inputMonths <= 0 ? 1 : inputMonths; 
+  // ✅ รับค่าจำนวนงวดที่จ่ายไปแล้ว
+  const paidCount = Number(data.paid_installments) || 0;
+  const inputMonths = Number(data.installment_months) || 1;
+  const months = inputMonths <= 0 ? 1 : inputMonths;
+  const amount = Number(data.amount) || 0;
+  const perMonth = round2(amount / months);
 
-  // บันทึกประวัติการรูด
+  // 1. บันทึก Transaction หลัก
   ss.getSheetByName("credit_transactions").appendRow([
     txId, data.card_id, data.type || "purchase", data.description,
-    Number(data.amount) || 0, new Date(data.transaction_date), months, "active", now
+    amount, new Date(data.transaction_date), months, "active", now
   ]);
 
-  // หาข้อมูลรอบบัตรเครดิต
-  const perMonth = round2(Number(data.amount) / months);
+  // 2. คำนวณรอบบิล
   const cardRows = ss.getSheetByName("credit_cards").getDataRange().getValues();
   cardRows.shift();
   const card = cardRows.find(r => String(r[0]).trim() === String(data.card_id).trim());
-  
-  // ถ้าไม่มีค่า Default ให้ตัดรอบวันที่ 25 และจ่ายวันที่ 15
   const closingDay = card ? Number(card[3]) : 25;
   const dueDay     = card ? Number(card[4]) : 15;
 
   const txDate = new Date(data.transaction_date);
-  
-  // ✅ 2. สูตรคำนวณวันตัดรอบและวันจ่าย (แก้ไขใหม่ให้ตรงเป๊ะตามชีวิตจริง)
-  // - ถ้ารูดหลังวันตัดรอบ ให้ปัดเดือนตัดรอบไปเดือนหน้า
   let statementMonth = txDate.getMonth() + (txDate.getDate() > closingDay ? 1 : 0);
-  
-  // - ถ้าวันจ่าย (Due) น้อยกว่าวันตัดรอบ (เช่น ตัด 25 จ่าย 15) แปลว่าต้องจ่ายเดือนถัดไป
-  // - แต่ถ้าวันจ่าย มากกว่าวันตัดรอบ (เช่น ตัด 12 จ่าย 30) แปลว่าจ่ายเดือนเดียวกับที่ตัดรอบ
   let dueMonth = statementMonth + (dueDay < closingDay ? 1 : 0);
   let dueYear  = txDate.getFullYear();
+  
+  if (dueMonth > 11) { dueMonth -= 12; dueYear++; }
 
-  // เช็คข้ามปี
-  if (dueMonth > 11) {
-    dueMonth -= 12;
-    dueYear++;
-  }
-
-  // สร้างรายการผ่อนรายเดือนลงชีต Installments
   const instSheet = ss.getSheetByName("credit_installments");
+  const expSheet  = ss.getSheetByName("expenses");
+
+  // 3. สร้างงวดผ่อนชำระ (Loop งวดที่ระบุว่าจ่ายแล้วให้เป็น paid)
   for (let i = 0; i < months; i++) {
     let m = dueMonth + i, y = dueYear;
-    while (m > 11) { m -= 12; y++; } // เช็คข้ามปีเผื่อกรณีผ่อนหลายเดือน
-    
+    while (m > 11) { m -= 12; y++; }
     const due = new Date(y, m, dueDay);
-    instSheet.appendRow([Utilities.getUuid(), txId, data.card_id, i + 1, perMonth, due, "unpaid", ""]);
+    
+    // ✅ Logic มาร์คจ่ายแล้วย้อนหลัง
+    const isPaid = i < paidCount;
+    const status = isPaid ? "paid" : "unpaid";
+    const payTimestamp = isPaid ? new Date() : "";
+
+    instSheet.appendRow([Utilities.getUuid(), txId, data.card_id, i + 1, perMonth, due, status, payTimestamp]);
+
+    // ✅ ถ้าจ่ายย้อนหลัง ให้ลงบัญชีรายจ่ายด้วยเพื่อให้ตัวเลขในชีตครบ
+    if (isPaid) {
+      expSheet.appendRow([
+        Utilities.getUuid(), due, "credit_payment", perMonth, "Transfer", 
+        `งวดที่ ${i+1}/${months} (ย้อนหลัง): ${data.description}`, 
+        txId, "credit", new Date()
+      ]);
+    }
   }
 
   return output({ status: "created", transaction_id: txId });

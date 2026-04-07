@@ -170,16 +170,9 @@ export default function LoansPage() {
   };
 
   const renderLoanCard = (loan) => {
-    let monthsPaid = 0;
-    if (loan.start_date) {
-      const start = new Date(loan.start_date);
-      const now = new Date();
-      monthsPaid = (now.getFullYear() - start.getFullYear()) * 12 + (now.getMonth() - start.getMonth());
-      if (now.getDate() >= start.getDate()) {
-        monthsPaid += 1; // Include current month if passed the start date day
-      }
-      if (monthsPaid < 0) monthsPaid = 0;
-      if (loan.total_months && monthsPaid > loan.total_months) monthsPaid = loan.total_months;
+    let monthsPaid = parseInt(loan.paid_installments) || 0;
+    if (loan.total_months && monthsPaid > loan.total_months) {
+      monthsPaid = loan.total_months;
     }
     const due = parseFloat(loan.monthly_due || loan.monthly_installment) || 0;
     const paidAmount = monthsPaid * due;

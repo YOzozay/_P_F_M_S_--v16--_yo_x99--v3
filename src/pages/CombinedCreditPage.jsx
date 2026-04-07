@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { CreditCard, Calendar, ShoppingCart, RefreshCw, Plus, Trash2, FileText, X } from 'lucide-react';
+import { CreditCard, Calendar, ShoppingCart, RefreshCw, Plus, Trash2, FileText, X, Edit } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { apiGet, apiPost } from "../api/gsApi";
 import { fmt } from "../utils/formatters";
@@ -19,6 +19,7 @@ export default function CombinedCreditPage() {
   const [installments, setInstallments] = useState([]);
   const [fullPayments, setFullPayments] = useState([]);
   const [selectedInstallment, setSelectedInstallment] = useState(null);
+  const [editingCard, setEditingCard] = useState(null);
 
   // --- State สำหรับ Form ---
   const [cardForm, setCardForm] = useState({ name: '', credit_limit: '', closing_day: '', due_day: '' });
@@ -112,6 +113,16 @@ export default function CombinedCreditPage() {
       loadAllData();
       setCardForm({ name: '', credit_limit: '', closing_day: '', due_day: '' });
     } catch (e) { showErrorAlert(e.message || "สร้างบัตรไม่สำเร็จ"); }
+  };
+
+  const handleEditCard = async (e) => {
+    e.preventDefault();
+    try {
+      await apiPost({ action: "editCreditCard", ...editingCard });
+      showSuccessAlert('อัปเดตข้อมูลบัตรเรียบร้อยแล้ว');
+      loadAllData();
+      setEditingCard(null);
+    } catch (e) { showErrorAlert(e.message || "แก้ไขบัตรไม่สำเร็จ"); }
   };
 
   const handleAddBill = async (e) => {
@@ -274,11 +285,14 @@ export default function CombinedCreditPage() {
 
                       return (
                         <div key={card.card_id} className={`p-4 bg-slate-50 dark:bg-slate-800/50 border rounded-xl relative group transition-all duration-200 ${active ? 'border-blue-400 shadow-sm' : 'border-slate-200 dark:border-slate-700 hover:border-slate-300'}`}>
-                          <button onClick={() => {
-                              const isDark = document.documentElement.classList.contains('dark');
-                              Swal.fire({ title: 'กำลังพัฒนา', text: 'ระบบลบบัตรกำลังอยู่ระหว่างพัฒนา', icon: 'info', background: isDark ? '#1e293b' : '#ffffff', color: isDark ? '#f8fafc' : '#334155' });
-                            }} className="absolute top-3 right-3 text-slate-400 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-opacity"><Trash2 size={16}/></button>
-                          <div className="font-semibold text-slate-800 dark:text-white text-lg">{card.name}</div>
+                          <div className="absolute top-3 right-3 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button onClick={() => setEditingCard({ card_id: card.card_id, name: card.name, credit_limit: card.credit_limit, closing_day: card.closing_day, due_day: card.due_day })} className="text-slate-400 hover:text-emerald-500 transition"><Edit size={16}/></button>
+                            <button onClick={() => {
+                                const isDark = document.documentElement.classList.contains('dark');
+                                Swal.fire({ title: 'กำลังพัฒนา', text: 'ระบบลบบัตรกำลังอยู่ระหว่างพัฒนา', icon: 'info', background: isDark ? '#1e293b' : '#ffffff', color: isDark ? '#f8fafc' : '#334155' });
+                              }} className="text-slate-400 hover:text-rose-500 transition"><Trash2 size={16}/></button>
+                          </div>
+                          <div className="font-semibold text-slate-800 dark:text-white text-lg pr-12">{card.name}</div>
                           
                           <div className="mt-2 flex justify-between items-end text-xs text-slate-500 dark:text-slate-400 space-y-1">
                             <div className="space-y-1">
@@ -504,6 +518,36 @@ export default function CombinedCreditPage() {
           </>
         )}
       </div>
+
+      {/* Edit Card Modal */}
+      {editingCard && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm px-4">
+          <div className="bg-white dark:bg-slate-800 w-full max-w-md rounded-2xl shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between p-4 border-b border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
+              <h3 className="font-bold text-slate-800 dark:text-white">แก้ไขบัตรเครดิต</h3>
+              <button 
+                onClick={() => setEditingCard(null)}
+                className="p-2 bg-slate-200 dark:bg-slate-700 rounded-full text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleEditCard} className="p-4 space-y-4">
+              <FInput required label="ชื่อบัตร" type="text" value={editingCard.name} onChange={v => setEditingCard({...editingCard, name: v})} placeholder="เช่น KTC, UOB" />
+              <FInput required label="วงเงิน (฿)" type="number" value={editingCard.credit_limit} onChange={v => setEditingCard({...editingCard, credit_limit: v})} placeholder="0" />
+              <div className="grid grid-cols-2 gap-4">
+                <FInput required label="วันตัดรอบบิล" type="number" min="1" max="31" value={editingCard.closing_day} onChange={v => setEditingCard({...editingCard, closing_day: v})} placeholder="1-31" />
+                <FInput required label="วันกำหนดจ่าย" type="number" min="1" max="31" value={editingCard.due_day} onChange={v => setEditingCard({...editingCard, due_day: v})} placeholder="1-31" />
+              </div>
+              <div className="mt-6 flex justify-end gap-2 border-t border-slate-100 dark:border-slate-700 pt-4">
+                <button type="button" onClick={() => setEditingCard(null)} className="px-4 py-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl font-medium transition-colors">ยกเลิก</button>
+                <button type="submit" className="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl font-medium transition-colors">บันทึกข้อมูล</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Installment Detail Modal */}
       {selectedInstallment && (
