@@ -1,61 +1,91 @@
 // ✅ ใส่ลิงก์ API ของคุณตรงนี้
 const API_URL =
-  "https://script.google.com/macros/s/AKfycbzm4gugdhsa_YiIuVBx4LiG8vvDyX_IZWdGo-If6IGQRGwFMJKYa0igJW7-nsuiAzO7/exec";
+  "https://script.google.com/macros/s/AKfycbyWfZ_8pXBOl4_xGXppvOQVAy43fOsYUwuP0tl4dc3tzeLei8WAb1CdlEO3kWfyfQQR/exec";
 
-// 📦 ตัวแปรเก็บข้อมูลชั่วคราว (Cache)
+// ─── State ───────────────────────────────────────────────
 let apiCache = {};
+let pendingRequests = {};
 
+// ─── Sequential Queue ────────────────────────────────────
+// ทำให้ทุก request เข้าคิวทีละอัน ป้องกัน Google Apps Script บล็อก
+// เพราะถ้ายิงพร้อมกันหลายอัน Google จะ ERR_CONNECTION_REFUSED
+let requestQueue = Promise.resolve();
+function enqueue(fn) {
+  requestQueue = requestQueue.then(fn, fn); // ต่อ chain เสมอ (ไม่ให้คิวพัง)
+  return requestQueue;
+}
+
+// ─── Retry with Exponential Backoff ──────────────────────
+async function fetchWithRetry(url, options = {}, retries = 3, baseDelay = 1000) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch(url, options);
+      return res;
+    } catch (err) {
+      if (attempt === retries) throw err;
+      const wait = baseDelay * Math.pow(2, attempt - 1); // 1s → 2s → 4s
+      console.warn(`⚠️ Retry ${attempt}/${retries} (${wait}ms):`, err.message);
+      await new Promise((r) => setTimeout(r, wait));
+    }
+  }
+}
+
+// ─── GET ─────────────────────────────────────────────────
 export const apiGet = async (params) => {
-  // สร้าง Key สำหรับจำข้อมูล เช่น '{"action":"getCarLoans"}'
   const cacheKey = JSON.stringify(params);
 
-  // ⚡ 1. ถ้ามีข้อมูลในแคชแล้ว ให้ส่งคืนเลยทันที (ไม่ต้องวิ่งไป Google Sheets)
+  // ⚡ 1. Cache hit → return immediately
   if (apiCache[cacheKey]) {
-    console.log("⚡ โหลดจาก Cache:", params.action);
+    console.log("⚡ Cache:", params.action);
     return apiCache[cacheKey];
   }
 
-  // ☁️ 2. ถ้ายังไม่มีในแคช ให้วิ่งไปดึงจาก Google Sheets
-  console.log("☁️ โหลดจาก Google Sheets:", params.action);
+  // ⏳ 2. Duplicate in-flight → share the Promise
+  if (pendingRequests[cacheKey]) {
+    console.log("⏳ Pending:", params.action);
+    return pendingRequests[cacheKey];
+  }
+
+  // ☁️ 3. New request → join the queue (sequential execution)
+  console.log("☁️ Fetch:", params.action);
   const url = new URL(API_URL);
   Object.keys(params).forEach((k) => url.searchParams.append(k, params[k]));
 
-  try {
-    const res = await fetch(url);
-    const data = await res.json();
-
-    // 💾 3. เก็บข้อมูลที่ได้ ลงในแคชเพื่อใช้รอบหน้า
-    if (!data.error) {
-      apiCache[cacheKey] = data;
+  pendingRequests[cacheKey] = enqueue(async () => {
+    try {
+      const res = await fetchWithRetry(url.toString());
+      const data = await res.json();
+      if (!data.error) apiCache[cacheKey] = data;
+      return data;
+    } catch (err) {
+      console.error("❌ API GET Error:", params.action, err.message);
+      return { error: err.message };
+    } finally {
+      delete pendingRequests[cacheKey];
     }
-    return data;
-  } catch (err) {
-    console.error("API GET Error:", err);
-    return { error: err.message };
-  }
+  });
+
+  return pendingRequests[cacheKey];
 };
 
+// ─── POST ────────────────────────────────────────────────
 export const apiPost = async (payload) => {
-  // 🗑️ สำคัญมาก: เวลามีการ เพิ่ม/ลบ/จ่ายเงิน ข้อมูลจะเปลี่ยน
-  // เราต้อง "ล้างแคชทิ้ง" ทั้งหมด เพื่อให้การเปลี่ยนหน้าครั้งต่อไปไปดึงข้อมูลใหม่
-  apiCache = {};
-  console.log("🗑️ ล้าง Cache เพราะมีการทำรายการ:", payload.action);
-
+  apiCache = {}; // ล้าง cache เมื่อมีการเปลี่ยนแปลงข้อมูล
+  console.log("📤 POST:", payload.action);
   try {
-    const res = await fetch(API_URL, {
+    const res = await fetchWithRetry(API_URL, {
       method: "POST",
       body: JSON.stringify(payload),
     });
     return res.json();
   } catch (err) {
-    console.error("API POST Error:", err);
+    console.error("❌ API POST Error:", err.message);
     return { error: err.message };
   }
 };
 
-export const delay = (ms) => new Promise((res) => setTimeout(res, ms));
+export const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// (Optional) ฟังก์ชันสำหรับสั่งล้างแคชด้วยตัวเอง ถ้าต้องการใช้ในอนาคต
 export const clearCache = () => {
   apiCache = {};
 };
